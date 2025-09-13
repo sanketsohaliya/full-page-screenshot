@@ -68,11 +68,17 @@ function IndexPopup() {
     }
   }
 
-  const captureAndCopyDirectly = async (mode: "visible" | "full" = "visible") => {
+  const captureAndCopyDirectly = async (mode: "visible" | "full" | "region" = "visible") => {
     if (isCapturing) return
 
     setIsCapturing(true)
-    setStatus(mode === "full" ? "Capturing full page..." : "Capturing visible area...")
+    setStatus(
+      mode === "full"
+        ? "Capturing full page..."
+        : mode === "region"
+          ? "Select an area on the page..."
+          : "Capturing visible area..."
+    )
 
     try {
       // Get the active tab
@@ -88,7 +94,7 @@ function IndexPopup() {
       if (mode === "visible") {
         // Capture the visible area directly
         dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' })
-      } else {
+      } else if (mode === "full") {
         // For full page, we'll send a message to trigger the existing full page capture
         setStatus("Initiating full page capture...")
 
@@ -112,6 +118,19 @@ function IndexPopup() {
             setStatus("❌ Full page capture failed: " + error.message)
           }
 
+          return null
+        }
+
+      } else if (mode === "region") {
+        // Trigger region selection mode in content script
+        try {
+          await chrome.runtime.sendMessage({ action: "capture-region" })
+          setStatus("Region selection activated. Switch to the page.")
+          // Do not close popup immediately; allow user to read instructions
+          return null
+        } catch (error) {
+          console.error("Region capture init failed:", error)
+          setStatus("❌ Region capture failed: " + error.message)
           return null
         }
       }
@@ -203,6 +222,24 @@ function IndexPopup() {
           fontWeight: "bold"
         }}>
         {isCapturing ? "Capturing..." : "📄 Capture Full Page"}
+      </button>
+
+      <button
+        onClick={() => captureAndCopyDirectly("region")}
+        disabled={isCapturing}
+        style={{
+          width: "100%",
+          padding: "14px",
+          backgroundColor: isCapturing ? "#ccc" : "#9C27B0",
+          color: "white",
+          border: "none",
+          borderRadius: "6px",
+          fontSize: "16px",
+          cursor: isCapturing ? "not-allowed" : "pointer",
+          marginBottom: "16px",
+          fontWeight: "bold"
+        }}>
+        {isCapturing ? "Activating..." : "✂️ Capture Region"}
       </button>
 
       <button

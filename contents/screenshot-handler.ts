@@ -853,7 +853,6 @@ class FullPageScreenshot {
   }
 
   public showNotification(message: string, type: "success" | "error" | "info") {
-    // Create a simple notification
     const notification = document.createElement("div")
     notification.style.cssText = `
       position: fixed;
@@ -871,26 +870,273 @@ class FullPageScreenshot {
     notification.textContent = message
     document.body.appendChild(notification)
 
-    // Remove notification after 3 seconds
     setTimeout(() => {
       if (notification.parentNode) {
         notification.parentNode.removeChild(notification)
       }
     }, 3000)
 
-    // Also send message to popup if it's open
     try {
       if (type === "success" && message.includes("clipboard")) {
         chrome.runtime.sendMessage({ action: "capture-complete" })
       } else if (type === "error") {
         chrome.runtime.sendMessage({ action: "capture-failed", error: message })
       }
-    } catch (e) {
-      // Popup might be closed, that's ok
-    }
+    } catch (e) {}
   }
 
+  // ================= REGION CAPTURE FEATURE =================
+  private regionOverlay: HTMLDivElement | null = null
+  private regionSelectionBox: HTMLDivElement | null = null
+  private regionStart: { x: number; y: number } | null = null
+  private regionCurrent: { x: number; y: number } | null = null
+  private regionLabel: HTMLDivElement | null = null
+  private regionActive = false
 
+  public startRegionSelection() {
+    if (this.regionActive) return
+    this.regionActive = true
+    this.createRegionOverlay()
+    this.showNotification("Drag to select area. Press ESC to cancel.", "info")
+  }
+
+  private createRegionOverlay() {
+    this.regionOverlay = document.createElement('div')
+    this.regionOverlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.15);
+      cursor: crosshair;
+      z-index: 2147483646;
+      backdrop-filter: blur(1px);
+    `
+
+    this.regionSelectionBox = document.createElement('div')
+    this.regionSelectionBox.style.cssText = `
+      position: fixed;
+      border: 2px solid #9C27B0;
+      background: rgba(156,39,176,0.15);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+      pointer-events: none;
+      z-index: 2147483647;
+    `
+
+    this.regionLabel = document.createElement('div')
+    this.regionLabel.style.cssText = `
+      position: fixed;
+      padding: 4px 8px;
+      background: #9C27B0;
+      color: white;
+      font: 12px/1 system-ui, sans-serif;
+      border-radius: 4px;
+      transform: translate(-50%, -140%);
+      pointer-events: none;
+      z-index: 2147483648;
+      white-space: nowrap;
+    `
+
+    document.body.appendChild(this.regionOverlay)
+    document.body.appendChild(this.regionSelectionBox)
+    document.body.appendChild(this.regionLabel)
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      this.regionStart = { x: e.clientX, y: e.clientY }
+      this.regionCurrent = { ...this.regionStart }
+      this.updateRegionUI()
+    }
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.regionStart) return
+      this.regionCurrent = { x: e.clientX, y: e.clientY }
+      this.updateRegionUI()
+    }
+
+    const onMouseUp = async () => {
+      if (!this.regionStart || !this.regionCurrent) return
+      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener('mousemove', onMouseMove, true)
+      document.removeEventListener('mouseup', onMouseUp, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+
+      const rect = this.getNormalizedRegion()
+      this.cleanupRegionUI()
+      this.regionActive = false
+
+      if (rect.width < 5 || rect.height < 5) {
+        this.showNotification('Selection too small, cancelled.', 'error')
+        return
+      }
+
+      this.showNotification('Capturing selection...', 'info')
+      try {
+        await this.captureRegion(rect)
+      } catch (err: any) {
+        console.error('Region capture failed:', err)
+        this.showNotification('Region capture failed: ' + err.message, 'error')
+      }
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        document.removeEventListener('mousedown', onMouseDown, true)
+        document.removeEventListener('mousemove', onMouseMove, true)
+        document.removeEventListener('mouseup', onMouseUp, true)
+        document.removeEventListener('keydown', onKeyDown, true)
+        this.cleanupRegionUI()
+        this.regionActive = false
+        this.showNotification('Region capture cancelled', 'error')
+      }
+    }
+
+    document.addEventListener('mousedown', onMouseDown, true)
+    document.addEventListener('mousemove', onMouseMove, true)
+    document.addEventListener('mouseup', onMouseUp, true)
+    document.addEventListener('keydown', onKeyDown, true)
+  }
+
+  private updateRegionUI() {
+    if (!this.regionStart || !this.regionCurrent || !this.regionSelectionBox || !this.regionLabel) return
+    const rect = this.getNormalizedRegion()
+    this.regionSelectionBox.style.left = rect.x + 'px'
+    this.regionSelectionBox.style.top = rect.y + 'px'
+    this.regionSelectionBox.style.width = rect.width + 'px'
+    this.regionSelectionBox.style.height = rect.height + 'px'
+    this.regionLabel.style.left = (rect.x + rect.width / 2) + 'px'
+    this.regionLabel.style.top = rect.y + 'px'
+    this.regionLabel.textContent = `${rect.width} x ${rect.height}`
+  }
+
+  private getNormalizedRegion() {
+    const x1 = this.regionStart!.x
+    const y1 = this.regionStart!.y
+    const x2 = this.regionCurrent!.x
+    const y2 = this.regionCurrent!.y
+    const left = Math.min(x1, x2)
+    const top = Math.min(y1, y2)
+    const width = Math.abs(x1 - x2)
+    const height = Math.abs(y1 - y2)
+    return { x: left, y: top, width, height }
+  }
+
+  private cleanupRegionUI() {
+    this.regionSelectionBox?.remove()
+    this.regionOverlay?.remove()
+    this.regionLabel?.remove()
+    this.regionSelectionBox = null
+    this.regionOverlay = null
+    this.regionLabel = null
+    this.regionStart = null
+    this.regionCurrent = null
+  }
+
+  private async captureRegion(rect: { x: number; y: number; width: number; height: number }) {
+    const scrollX = window.scrollX
+    const scrollY = window.scrollY
+
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const handler = (message: any) => {
+        if (message.action === 'screenshot-captured') {
+          chrome.runtime.onMessage.removeListener(handler)
+          resolve(message.dataUrl)
+        } else if (message.action === 'screenshot-error') {
+          chrome.runtime.onMessage.removeListener(handler)
+          reject(new Error(message.error))
+        }
+      }
+      chrome.runtime.onMessage.addListener(handler)
+      chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: scrollX, y: scrollY } })
+    })
+
+    const cropped = await this.cropDataUrl(dataUrl, rect)
+    // Present interactive options (copy/download) for region capture
+    this.showRegionResultOptions(cropped)
+  }
+
+  private async cropDataUrl(dataUrl: string, rect: { x: number; y: number; width: number; height: number }): Promise<string> {
+    const img = new Image()
+    img.src = dataUrl
+    await new Promise((res, rej) => { img.onload = () => res(null); img.onerror = rej })
+    const canvas = document.createElement('canvas')
+    canvas.width = rect.width
+    canvas.height = rect.height
+    const ctx = canvas.getContext('2d')!
+    const scale = devicePixelRatio || 1
+    ctx.drawImage(
+      img,
+      rect.x * scale,
+      rect.y * scale,
+      rect.width * scale,
+      rect.height * scale,
+      0,
+      0,
+      rect.width,
+      rect.height
+    )
+    return canvas.toDataURL('image/png')
+  }
+
+  private showRegionResultOptions(dataUrl: string) {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      z-index: 2147483649; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-family: system-ui, Arial, sans-serif; padding: 24px; gap: 16px;`;
+
+    const preview = document.createElement('img')
+    preview.src = dataUrl
+    preview.style.cssText = 'max-width:70vw; max-height:50vh; border:2px solid #9C27B0; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,0.4); background:#fff;'
+
+    const buttons = document.createElement('div')
+    buttons.style.cssText = 'display:flex; gap:12px;'
+
+    const copyBtn = document.createElement('button')
+    copyBtn.textContent = '📋 Copy'
+    copyBtn.style.cssText = this.buildButtonStyle('#2196F3')
+
+    const downloadBtn = document.createElement('button')
+    downloadBtn.textContent = '💾 Download'
+    downloadBtn.style.cssText = this.buildButtonStyle('#4CAF50')
+
+    const closeBtn = document.createElement('button')
+    closeBtn.textContent = '✕ Close'
+    closeBtn.style.cssText = this.buildButtonStyle('#9E9E9E')
+
+    const status = document.createElement('div')
+    status.style.cssText = 'color:#fff; font-size:13px; min-height:18px; text-shadow:0 1px 2px rgba(0,0,0,0.5);'
+
+    copyBtn.onclick = async () => {
+      copyBtn.disabled = true
+      copyBtn.textContent = '⏳ Copying...'
+      try {
+        await this.copyImageDirectlyToClipboard(dataUrl)
+        copyBtn.textContent = '✅ Copied'
+        status.textContent = 'Region copied to clipboard'
+        setTimeout(() => { overlay.remove() }, 800)
+      } catch (e: any) {
+        copyBtn.textContent = '❌ Failed'
+        status.textContent = 'Copy failed. Try download.'
+        copyBtn.disabled = false
+        setTimeout(() => { copyBtn.textContent = '📋 Copy' }, 1500)
+      }
+    }
+
+    downloadBtn.onclick = () => {
+      this.downloadImage(dataUrl, `region-screenshot-${Date.now()}.png`)
+      status.textContent = 'Downloaded.'
+    }
+
+    closeBtn.onclick = () => overlay.remove()
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
+
+    buttons.append(copyBtn, downloadBtn, closeBtn)
+    overlay.append(preview, buttons, status)
+    document.body.appendChild(overlay)
+  }
+
+  private buildButtonStyle(color: string) {
+    return `background:${color}; color:#fff; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500; box-shadow:0 2px 6px rgba(0,0,0,0.25); transition:filter .15s;`
+  }
 }
 
 // Create instance and listen for messages
@@ -912,6 +1158,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "capture-visible-area") {
     console.log("Starting visible area capture...")
     screenshotHandler.captureVisibleArea()
+  } else if (message.action === 'capture-region') {
+    console.log('Starting region selection mode...')
+    screenshotHandler.startRegionSelection()
   } else if (message.action === "clipboard-success") {
     console.log("Clipboard copy successful:", message.message)
     screenshotHandler.showNotification(message.message, "success")

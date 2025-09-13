@@ -126,6 +126,14 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         })
       }
     }
+  } else if (message.action === 'capture-region') {
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!activeTab?.id) return
+      chrome.tabs.sendMessage(activeTab.id, { action: 'capture-region' })
+    } catch (e) {
+      console.error('Error forwarding region capture message:', e)
+    }
   }
 })
 
