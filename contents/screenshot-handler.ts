@@ -334,130 +334,7 @@ class FullPageScreenshot {
   }
 
   private showInteractiveClipboardOption(dataUrl: string) {
-    // Create overlay
-    const overlay = document.createElement('div')
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.8);
-      z-index: 10000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `
-
-    // Create dialog
-    const dialog = document.createElement('div')
-    dialog.style.cssText = `
-      background: white;
-      padding: 30px;
-      border-radius: 12px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-      text-align: center;
-      max-width: 400px;
-      margin: 20px;
-    `
-
-    // Create content
-    dialog.innerHTML = `
-      <h3 style="margin: 0 0 20px 0; color: #333; font-size: 18px;">Full Page Screenshot Ready!</h3>
-      <p style="margin: 0 0 25px 0; color: #666; line-height: 1.5;">
-        Click the button below to copy the screenshot to your clipboard:
-      </p>
-      <div style="display: flex; gap: 12px; justify-content: center;">
-        <button id="copyBtn" style="
-          background: #007AFF;
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.2s;
-        ">📋 Copy to Clipboard</button>
-        <button id="downloadBtn" style="
-          background: #34C759;
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.2s;
-        ">💾 Download</button>
-        <button id="closeBtn" style="
-          background: #FF3B30;
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.2s;
-        ">✕ Close</button>
-      </div>
-    `
-
-    overlay.appendChild(dialog)
-    document.body.appendChild(overlay)
-
-    // Add event listeners
-    const copyBtn = dialog.querySelector('#copyBtn') as HTMLButtonElement
-    const downloadBtn = dialog.querySelector('#downloadBtn') as HTMLButtonElement
-    const closeBtn = dialog.querySelector('#closeBtn') as HTMLButtonElement
-
-    copyBtn.addEventListener('click', async () => {
-      try {
-        copyBtn.textContent = '⏳ Copying...'
-        copyBtn.disabled = true
-
-        // User interaction triggered clipboard - this should work!
-        await this.copyImageDirectlyToClipboard(dataUrl)
-
-        copyBtn.textContent = '✅ Copied!'
-        copyBtn.style.background = '#34C759'
-
-        setTimeout(() => {
-          document.body.removeChild(overlay)
-          this.showNotification("Full page screenshot copied to clipboard!", "success")
-        }, 1000)
-
-      } catch (error) {
-        console.error('Interactive clipboard failed:', error)
-        copyBtn.textContent = '❌ Failed'
-        copyBtn.style.background = '#FF3B30'
-
-        setTimeout(() => {
-          copyBtn.textContent = '📋 Copy to Clipboard'
-          copyBtn.style.background = '#007AFF'
-          copyBtn.disabled = false
-        }, 2000)
-      }
-    })
-
-    downloadBtn.addEventListener('click', () => {
-      this.downloadImage(dataUrl, `full-page-screenshot-${Date.now()}.png`)
-      document.body.removeChild(overlay)
-      this.showNotification("Full page screenshot downloaded!", "success")
-    })
-
-    closeBtn.addEventListener('click', () => {
-      document.body.removeChild(overlay)
-    })
-
-    // Close on overlay click
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        document.body.removeChild(overlay)
-      }
-    })
+    this.showResultOverlay('Full Page Screenshot', dataUrl, 'full-page-screenshot')
   }
 
   private async copyImageDirectlyToClipboard(dataUrl: string): Promise<void> {
@@ -1229,65 +1106,53 @@ class FullPageScreenshot {
   }
 
   private showRegionResultOptions(dataUrl: string) {
-    const overlay = document.createElement('div')
-    overlay.style.cssText = `
-      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-      z-index: 2147483649; display: flex; flex-direction: column; align-items: center; justify-content: center;
-      font-family: system-ui, Arial, sans-serif; padding: 24px; gap: 16px;`;
-
-    const preview = document.createElement('img')
-    preview.src = dataUrl
-    preview.style.cssText = 'max-width:70vw; max-height:50vh; border:2px solid #9C27B0; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,0.4); background:#fff;'
-
-    const buttons = document.createElement('div')
-    buttons.style.cssText = 'display:flex; gap:12px;'
-
-    const copyBtn = document.createElement('button')
-    copyBtn.textContent = '📋 Copy'
-    copyBtn.style.cssText = this.buildButtonStyle('#2196F3')
-
-    const downloadBtn = document.createElement('button')
-    downloadBtn.textContent = '💾 Download'
-    downloadBtn.style.cssText = this.buildButtonStyle('#4CAF50')
-
-    const closeBtn = document.createElement('button')
-    closeBtn.textContent = '✕ Close'
-    closeBtn.style.cssText = this.buildButtonStyle('#9E9E9E')
-
-    const status = document.createElement('div')
-    status.style.cssText = 'color:#fff; font-size:13px; min-height:18px; text-shadow:0 1px 2px rgba(0,0,0,0.5);'
-
-    copyBtn.onclick = async () => {
-      copyBtn.disabled = true
-      copyBtn.textContent = '⏳ Copying...'
-      try {
-        await this.copyImageDirectlyToClipboard(dataUrl)
-        copyBtn.textContent = '✅ Copied'
-        status.textContent = 'Region copied to clipboard'
-        setTimeout(() => { overlay.remove() }, 800)
-      } catch (e: any) {
-        copyBtn.textContent = '❌ Failed'
-        status.textContent = 'Copy failed. Try download.'
-        copyBtn.disabled = false
-        setTimeout(() => { copyBtn.textContent = '📋 Copy' }, 1500)
-      }
-    }
-
-    downloadBtn.onclick = () => {
-      this.downloadImage(dataUrl, `region-screenshot-${Date.now()}.png`)
-      status.textContent = 'Downloaded.'
-    }
-
-    closeBtn.onclick = () => overlay.remove()
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove() }
-
-    buttons.append(copyBtn, downloadBtn, closeBtn)
-    overlay.append(preview, buttons, status)
-    document.body.appendChild(overlay)
+    this.showResultOverlay('Region Screenshot', dataUrl, 'region-screenshot')
   }
 
-  private buildButtonStyle(color: string) {
-    return `background:${color}; color:#fff; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500; box-shadow:0 2px 6px rgba(0,0,0,0.25); transition:filter .15s;`
+  private showResultOverlay(titleText: string, dataUrl: string, filenameBase: string) {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+    const panel = document.createElement('div')
+    panel.style.cssText = 'background:#111416;border:1px solid #1e2429;border-radius:14px;max-width:560px;max-height:80vh;display:flex;flex-direction:column;gap:14px;padding:16px 18px;box-shadow:0 6px 24px rgba(0,0,0,.45);width:min(90vw,560px);'
+    const title = document.createElement('div')
+    title.textContent = titleText
+    title.style.cssText = 'font-size:14px;font-weight:600;letter-spacing:.3px;color:#e7eaec;'
+    const preview = document.createElement('img')
+    preview.src = dataUrl
+    preview.style.cssText = 'max-width:100%;max-height:50vh;border:1px solid #232a30;border-radius:10px;background:#0f1214;object-fit:contain;'
+    const actions = document.createElement('div')
+    actions.style.cssText = 'display:flex;gap:10px;'
+    const status = document.createElement('div')
+    status.style.cssText = 'font-size:11px;min-height:16px;color:#7f8a93;letter-spacing:.2px;'
+    const mkBtn = (label:string)=>{ const b=document.createElement('button'); b.textContent=label; b.style.cssText='flex:1;background:#151b20;border:none;border-radius:10px;color:#e7eaec;font-size:12.5px;font-weight:500;padding:10px 12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s;box-shadow:0 1px 2px rgba(0,0,0,.35)'; b.onmouseenter=()=>{if(!b.disabled)b.style.background='#1b2329'}; b.onmouseleave=()=>{if(!b.disabled)b.style.background='#151b20'}; b.onmousedown=()=>{if(!b.disabled)b.style.background='#202a31'}; b.onmouseup=()=>{if(!b.disabled)b.style.background='#1b2329'}; return b }
+    const copyBtn = mkBtn('Copy')
+    const downloadBtn = mkBtn('Download')
+    const closeBtn = mkBtn('Close')
+    actions.append(copyBtn, downloadBtn, closeBtn)
+    panel.append(title, preview, actions, status)
+    overlay.append(panel)
+    document.body.appendChild(overlay)
+    copyBtn.onclick = async ()=>{ copyBtn.disabled=true; copyBtn.textContent='Copying…'; status.textContent='Copying to clipboard...'; try { await this.copyImageDirectlyToClipboard(dataUrl); copyBtn.textContent='Copied'; status.textContent='Copied.'; setTimeout(()=>overlay.remove(),650) } catch(e:any){ copyBtn.textContent='Failed'; status.textContent='Copy failed'; copyBtn.disabled=false } }
+    downloadBtn.onclick = ()=>{ this.downloadImage(dataUrl, `${filenameBase}-${Date.now()}.png`); status.textContent='Downloaded.' }
+    closeBtn.onclick = ()=> overlay.remove()
+    overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove() }
+  }
+
+  public async captureVisibleAreaOverlay(): Promise<void> {
+    if (this.isCapturing) return
+    this.isCapturing = true
+    this.screenshots = []
+    try {
+      await this.captureCurrentView(window.scrollX, window.scrollY)
+      if (this.screenshots.length) {
+        const dataUrl = this.screenshots[0].dataUrl
+        this.showResultOverlay('Visible Area Screenshot', dataUrl, 'visible-area-screenshot')
+      }
+    } catch(e:any) {
+      this.showNotification('Visible area capture failed: '+ e.message, 'error')
+    } finally {
+      this.isCapturing = false
+    }
   }
 }
 
@@ -1309,7 +1174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     screenshotHandler.captureFullPage(true) // Enable clipboard copying
   } else if (message.action === "capture-visible-area") {
     console.log("Starting visible area capture...")
-    screenshotHandler.captureVisibleArea()
+    screenshotHandler.captureVisibleAreaOverlay()
   } else if (message.action === 'capture-region') {
     console.log('Starting region selection mode...')
     screenshotHandler.startRegionSelection()

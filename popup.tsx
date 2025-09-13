@@ -33,100 +33,27 @@ function IndexPopup() {
     }
   }, [])
 
-  const captureAndCopyDirectly = async (mode: "visible" | "full" | "region" = "visible") => {
+  const initiateCapture = async (mode: "visible" | "full" | "region" = "visible") => {
     if (isCapturing) return
-
     setIsCapturing(true)
-    setStatus(
-      mode === "full"
-        ? "Capturing full page..."
-        : mode === "region"
-          ? "Select an area on the page..."
-          : "Capturing visible area..."
-    )
     setMode(mode)
-
+    // Close regardless of success so selecting an option always dismisses popup
+    const closeSoon = () => { try { window.close() } catch(_) {} }
+    setTimeout(closeSoon, 30)
     try {
-      // Get the active tab
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-
-      if (!activeTab?.id) {
-        setStatus("Error: No active tab found")
-        return
+      if (mode === 'visible') {
+        setStatus('Capturing visible area...')
+        chrome.runtime.sendMessage({ action: 'capture-visible-area' }).catch(()=>{})
+      } else if (mode === 'full') {
+        setStatus('Capturing full page...')
+        chrome.runtime.sendMessage({ action: 'capture-full-page' }).catch(()=>{})
+      } else if (mode === 'region') {
+        setStatus('Select region on page...')
+        chrome.runtime.sendMessage({ action: 'capture-region' }).catch(()=>{})
       }
-
-      let dataUrl: string
-
-      if (mode === "visible") {
-        // Capture the visible area directly
-        dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' })
-      } else if (mode === "full") {
-        // For full page, we'll send a message to trigger the existing full page capture
-        setStatus("Initiating full page capture...")
-
-        try {
-          // Send message to background script to start full page capture
-          await chrome.runtime.sendMessage({ action: "capture-full-page" })
-
-          setStatus("Full page capture in progress... This may take a moment for large pages.")
-
-          // Don't close popup immediately - let the user see the progress
-          // The content script will handle the capture and clipboard copying
-
-          return null // Don't try to copy to clipboard here, the content script will handle it
-
-        } catch (error) {
-          console.error("Full page capture error:", error)
-
-          if (error.message.includes("Could not establish connection")) {
-            setStatus("❌ Please refresh the page and try again. The extension needs to load on the page first.")
-          } else {
-            setStatus("❌ Full page capture failed: " + error.message)
-          }
-
-          return null
-        }
-
-      } else if (mode === "region") {
-        // Trigger region selection mode in content script
-        try {
-          await chrome.runtime.sendMessage({ action: "capture-region" })
-          setStatus("Region selection activated. Switch to the page.")
-          // Do not close popup immediately; allow user to read instructions
-          return null
-        } catch (error) {
-          console.error("Region capture init failed:", error)
-          setStatus("❌ Region capture failed: " + error.message)
-          return null
-        }
-      }
-
-      // Only copy to clipboard if we have dataUrl (visible area capture)
-      if (dataUrl) {
-        setStatus("Copying to clipboard...")
-
-        // Convert to blob and copy to clipboard directly in popup
-        const response = await fetch(dataUrl)
-        const blob = await response.blob()
-
-        await navigator.clipboard.write([
-          new ClipboardItem({ 'image/png': blob })
-        ])
-
-        setStatus("✅ Screenshot copied to clipboard!")
-
-        // Close popup after success
-        setTimeout(() => {
-          window.close()
-        }, 2000)
-      }
-      // For full page capture, the popup already closed and content script handles clipboard
-
     } catch (error) {
-      console.error("Direct capture error:", error)
-      setStatus("❌ Capture failed: " + error.message)
-    } finally {
-      setIsCapturing(false)
+      // Even on error we already scheduled close
+      console.error('Capture initiation failed:', error)
     }
   }
 
@@ -164,7 +91,7 @@ function IndexPopup() {
           color="neutral"
           loading={isCapturing && mode==='visible'}
           disabled={isCapturing}
-          onClick={() => captureAndCopyDirectly('visible')}
+          onClick={() => initiateCapture('visible')}
           compact={compact}
         />
         <ActionButton
@@ -173,7 +100,7 @@ function IndexPopup() {
           color="neutral"
           loading={isCapturing && mode==='full'}
           disabled={isCapturing}
-          onClick={() => captureAndCopyDirectly('full')}
+          onClick={() => initiateCapture('full')}
           compact={compact}
         />
         <ActionButton
@@ -182,7 +109,7 @@ function IndexPopup() {
           color="neutral"
           loading={isCapturing && mode==='region'}
           disabled={isCapturing}
-          onClick={() => captureAndCopyDirectly('region')}
+          onClick={() => initiateCapture('region')}
           compact={compact}
         />
       </div>
