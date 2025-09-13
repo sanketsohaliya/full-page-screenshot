@@ -974,6 +974,7 @@ class FullPageScreenshot {
       if (!this.regionStart) return
       this.regionCurrent = { x: e.pageX, y: e.pageY }
       this.updateRegionUI()
+      this.maybeAutoScroll(e)
     }
 
     const onMouseUp = async () => {
@@ -1026,6 +1027,37 @@ class FullPageScreenshot {
     document.addEventListener('mousemove', onMouseMove, true)
     document.addEventListener('mouseup', onMouseUp, true)
     document.addEventListener('keydown', onKeyDown, true)
+  }
+
+  // Auto-scroll when dragging near viewport edges
+  private autoScrollInterval: number | null = null
+  private lastAutoScrollCheck = 0
+  private maybeAutoScroll(e: MouseEvent) {
+    const edgeThreshold = 60
+    const maxStep = 35
+    const now = performance.now()
+    if (now - this.lastAutoScrollCheck < 16) return
+    this.lastAutoScrollCheck = now
+
+    const viewportTop = window.scrollY
+    const viewportBottom = viewportTop + window.innerHeight
+    const y = e.clientY // viewport coordinates
+
+    let deltaY = 0
+    if (y < edgeThreshold) {
+      deltaY = -Math.min(maxStep, (edgeThreshold - y) * 0.6)
+    } else if (window.innerHeight - y < edgeThreshold) {
+      deltaY = Math.min(maxStep, (edgeThreshold - (window.innerHeight - y)) * 0.6)
+    }
+
+    if (deltaY !== 0) {
+      window.scrollBy({ top: deltaY, behavior: 'auto' })
+      // After scrolling, refresh current pointer position to keep rectangle accurate
+      if (this.regionCurrent) {
+        this.regionCurrent = { x: e.pageX, y: e.pageY + (deltaY) }
+        this.updateRegionUI()
+      }
+    }
   }
 
   private updateRegionUI() {
