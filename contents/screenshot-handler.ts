@@ -106,15 +106,15 @@ class FullPageScreenshot {
       console.log(`Loop will go: row 0 to ${verticalScreenshots-1}, col 0 to ${horizontalScreenshots-1}`)
 
       // No artificial limits - capture the entire page regardless of size
-      console.log(`Will capture entire page with ${verticalScreenshots}x${horizontalScreenshots} = ${totalScreenshots} screenshots`)
-      this.showNotification(`Starting full page capture (${totalScreenshots} screenshots)...`, "info")
+  console.log(`Will capture entire page with ${verticalScreenshots}x${horizontalScreenshots} = ${totalScreenshots} screenshots`)
+  // Removed start notification (user requested no notification for full page capture)
 
       // Set expected screenshot count
       this.expectedScreenshots = totalScreenshots
 
       // Initialize progress overlay (playful dot eater). Avoid trademark imagery; use generic emoji.
       try {
-        this.progressOverlay = this.showProgressOverlay(totalScreenshots)
+        this.progressOverlay = this.showProgressOverlay(totalScreenshots, 'Capturing full page…')
       } catch(e) {
         console.warn('Progress overlay failed to initialize', e)
       }
@@ -255,7 +255,7 @@ class FullPageScreenshot {
     }
   }
 
-  private showProgressOverlay(total: number) {
+  private showProgressOverlay(total: number, titleText: string = 'Capturing full page…') {
     // Cap displayed dots to a reasonable number
     const maxDots = 40
     const useDots = Math.min(total, maxDots)
@@ -264,8 +264,8 @@ class FullPageScreenshot {
     overlay.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;pointer-events:none;'
     const panel = document.createElement('div')
     panel.style.cssText = 'background:rgba(17,20,22,.88);backdrop-filter:blur(6px);padding:10px 14px 12px;border:1px solid #1e2429;border-radius:14px;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:220px;box-shadow:0 4px 18px rgba(0,0,0,.45);'
-    const title = document.createElement('div')
-    title.textContent = 'Capturing full page…'
+  const title = document.createElement('div')
+  title.textContent = titleText
     title.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:.3px;color:#e7eaec;'
   const meterWrap = document.createElement('div')
   meterWrap.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;width:100%;'
@@ -960,8 +960,6 @@ class FullPageScreenshot {
         this.showNotification('Selection too small, cancelled.', 'error')
         return
       }
-
-      this.showNotification('Capturing selection...', 'info')
       try {
         await this.captureRegion(rect)
       } catch (err: any) {
@@ -1074,23 +1072,30 @@ class FullPageScreenshot {
       rect.y + rect.height <= currentScrollY + viewportHeight
 
     if (fullyVisible && rect.width <= viewportWidth && rect.height <= viewportHeight) {
-      // Single capture path
-      const dataUrl: string = await new Promise((resolve, reject) => {
-        const handler = (message: any) => {
-          if (message.action === 'screenshot-captured') {
-            chrome.runtime.onMessage.removeListener(handler)
-            resolve(message.dataUrl)
-          } else if (message.action === 'screenshot-error') {
-            chrome.runtime.onMessage.removeListener(handler)
-            reject(new Error(message.error))
+      // Single capture path with progress overlay (1 step)
+      let localOverlay: {update:(c:number,t:number)=>void;remove:()=>void}|undefined
+      try { localOverlay = this.showProgressOverlay(1, 'Capturing region…') } catch(_) {}
+      try {
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          const handler = (message: any) => {
+            if (message.action === 'screenshot-captured') {
+              chrome.runtime.onMessage.removeListener(handler)
+              resolve(message.dataUrl)
+            } else if (message.action === 'screenshot-error') {
+              chrome.runtime.onMessage.removeListener(handler)
+              reject(new Error(message.error))
+            }
           }
-        }
-        chrome.runtime.onMessage.addListener(handler)
-        chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: currentScrollX, y: currentScrollY } })
-      })
-      const relativeViewportRect = { x: rect.x - currentScrollX, y: rect.y - currentScrollY, width: rect.width, height: rect.height }
-      const cropped = await this.cropDataUrl(dataUrl, relativeViewportRect)
-      this.showRegionResultOptions(cropped)
+          chrome.runtime.onMessage.addListener(handler)
+          chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: currentScrollX, y: currentScrollY } })
+        })
+        localOverlay?.update(1,1)
+        const relativeViewportRect = { x: rect.x - currentScrollX, y: rect.y - currentScrollY, width: rect.width, height: rect.height }
+        const cropped = await this.cropDataUrl(dataUrl, relativeViewportRect)
+        this.showRegionResultOptions(cropped)
+      } finally {
+        try { if (localOverlay) { const ref = localOverlay; setTimeout(()=>{ try { ref.remove() } catch(_){} }, 400) } } catch(_) {}
+      }
     } else {
       await this.captureRegionMultiScroll(rect)
     }
@@ -1133,9 +1138,21 @@ class FullPageScreenshot {
       resolve()
     })
 
+    // Region progress overlay across tiles
+    const totalTiles = xTiles.length * yTiles.length
+    let regionOverlayRef: {update:(c:number,t:number)=>void;remove:()=>void}|undefined
+    try { regionOverlayRef = this.showProgressOverlay(totalTiles, 'Capturing region…') } catch(_) {}
+
+    let capturedTiles = 0
     for (const y of yTiles) {
       for (const x of xTiles) {
-        try { await captureTile(x, y) } catch (e) { console.error('Tile capture failed', x, y, e) }
+        try {
+          await captureTile(x, y)
+          capturedTiles++
+          try { regionOverlayRef?.update(capturedTiles, totalTiles) } catch(_) {}
+        } catch (e) {
+          console.error('Tile capture failed', x, y, e)
+        }
       }
     }
 
@@ -1163,7 +1180,9 @@ class FullPageScreenshot {
     }
 
     const finalDataUrl = canvas.toDataURL('image/png')
+    try { regionOverlayRef?.update(totalTiles,totalTiles) } catch(_) {}
     this.showRegionResultOptions(finalDataUrl)
+    try { if (regionOverlayRef) { const ref = regionOverlayRef; setTimeout(()=>{ try { ref.remove() } catch(_){} }, 450) } } catch(_) {}
   }
 
   private async cropDataUrl(dataUrl: string, rect: { x: number; y: number; width: number; height: number }): Promise<string> {
