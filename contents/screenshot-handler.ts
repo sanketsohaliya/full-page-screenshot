@@ -892,6 +892,7 @@ class FullPageScreenshot {
   private regionCurrent: { x: number; y: number } | null = null
   private regionLabel: HTMLDivElement | null = null
   private regionActive = false
+  private regionUsesPageCoords = true
 
   public startRegionSelection() {
     if (this.regionActive) return
@@ -901,29 +902,41 @@ class FullPageScreenshot {
   }
 
   private createRegionOverlay() {
+    const pageWidth = Math.max(
+      document.documentElement.scrollWidth,
+      document.body.scrollWidth,
+      document.documentElement.clientWidth
+    )
+    const pageHeight = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+      document.documentElement.clientHeight
+    )
+
     this.regionOverlay = document.createElement('div')
     this.regionOverlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.15);
+      position: absolute;
+      top:0; left:0;
+      width:${pageWidth}px; height:${pageHeight}px;
+      background: rgba(0,0,0,0.08);
       cursor: crosshair;
       z-index: 2147483646;
-      backdrop-filter: blur(1px);
+      pointer-events:none;
     `
 
     this.regionSelectionBox = document.createElement('div')
     this.regionSelectionBox.style.cssText = `
-      position: fixed;
+      position: absolute;
       border: 2px solid #9C27B0;
-      background: rgba(156,39,176,0.15);
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+      background: rgba(156,39,176,0.18);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.35);
       pointer-events: none;
       z-index: 2147483647;
     `
 
     this.regionLabel = document.createElement('div')
     this.regionLabel.style.cssText = `
-      position: fixed;
+      position: absolute;
       padding: 4px 8px;
       background: #9C27B0;
       color: white;
@@ -939,16 +952,27 @@ class FullPageScreenshot {
     document.body.appendChild(this.regionSelectionBox)
     document.body.appendChild(this.regionLabel)
 
+    // Prevent page text selection / cursor artifacts while dragging
+    const selectionBlockStyleId = '__fps_region_selection_block__'
+    let styleEl = document.getElementById(selectionBlockStyleId) as HTMLStyleElement | null
+    if (!styleEl) {
+      styleEl = document.createElement('style')
+      styleEl.id = selectionBlockStyleId
+      styleEl.textContent = `*{user-select:none!important;-webkit-user-select:none!important;} body{cursor:crosshair!important;} html{cursor:crosshair!important;}`
+      document.head.appendChild(styleEl)
+    }
+
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return
-      this.regionStart = { x: e.clientX, y: e.clientY }
+      // pageX/pageY allow selection larger than viewport while scrolling
+      this.regionStart = { x: e.pageX, y: e.pageY }
       this.regionCurrent = { ...this.regionStart }
       this.updateRegionUI()
     }
 
     const onMouseMove = (e: MouseEvent) => {
       if (!this.regionStart) return
-      this.regionCurrent = { x: e.clientX, y: e.clientY }
+      this.regionCurrent = { x: e.pageX, y: e.pageY }
       this.updateRegionUI()
     }
 
@@ -962,6 +986,13 @@ class FullPageScreenshot {
       const rect = this.getNormalizedRegion()
       this.cleanupRegionUI()
       this.regionActive = false
+
+      // Important: wait a frame so Chrome repaints without overlay/border before capture
+      await this.sleep(80)
+
+  // Restore selection ability
+  const styleNode = document.getElementById(selectionBlockStyleId)
+  if (styleNode) styleNode.remove()
 
       if (rect.width < 5 || rect.height < 5) {
         this.showNotification('Selection too small, cancelled.', 'error')
@@ -986,6 +1017,8 @@ class FullPageScreenshot {
         this.cleanupRegionUI()
         this.regionActive = false
         this.showNotification('Region capture cancelled', 'error')
+        const styleNode = document.getElementById(selectionBlockStyleId)
+        if (styleNode) styleNode.remove()
       }
     }
 
@@ -1033,24 +1066,111 @@ class FullPageScreenshot {
   private async captureRegion(rect: { x: number; y: number; width: number; height: number }) {
     const scrollX = window.scrollX
     const scrollY = window.scrollY
+    // Safety: small delay to ensure any transient UI is gone
+    await this.sleep(20)
 
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const handler = (message: any) => {
-        if (message.action === 'screenshot-captured') {
-          chrome.runtime.onMessage.removeListener(handler)
-          resolve(message.dataUrl)
-        } else if (message.action === 'screenshot-error') {
-          chrome.runtime.onMessage.removeListener(handler)
-          reject(new Error(message.error))
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const currentScrollX = window.scrollX
+    const currentScrollY = window.scrollY
+
+    const fullyVisible =
+      rect.x >= currentScrollX &&
+      rect.y >= currentScrollY &&
+      rect.x + rect.width <= currentScrollX + viewportWidth &&
+      rect.y + rect.height <= currentScrollY + viewportHeight
+
+    if (fullyVisible && rect.width <= viewportWidth && rect.height <= viewportHeight) {
+      // Single capture path
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const handler = (message: any) => {
+          if (message.action === 'screenshot-captured') {
+            chrome.runtime.onMessage.removeListener(handler)
+            resolve(message.dataUrl)
+          } else if (message.action === 'screenshot-error') {
+            chrome.runtime.onMessage.removeListener(handler)
+            reject(new Error(message.error))
+          }
         }
-      }
-      chrome.runtime.onMessage.addListener(handler)
-      chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: scrollX, y: scrollY } })
+        chrome.runtime.onMessage.addListener(handler)
+        chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: currentScrollX, y: currentScrollY } })
+      })
+      const relativeViewportRect = { x: rect.x - currentScrollX, y: rect.y - currentScrollY, width: rect.width, height: rect.height }
+      const cropped = await this.cropDataUrl(dataUrl, relativeViewportRect)
+      this.showRegionResultOptions(cropped)
+    } else {
+      await this.captureRegionMultiScroll(rect)
+    }
+  }
+
+  private async captureRegionMultiScroll(rect: { x: number; y: number; width: number; height: number }) {
+    const original = { x: window.scrollX, y: window.scrollY }
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const dpr = devicePixelRatio || 1
+    const xTiles: number[] = []
+    const yTiles: number[] = []
+
+    const startX = Math.floor(rect.x / viewportWidth) * viewportWidth
+    const startY = Math.floor(rect.y / viewportHeight) * viewportHeight
+    for (let x = startX; x < rect.x + rect.width; x += viewportWidth) xTiles.push(x)
+    for (let y = startY; y < rect.y + rect.height; y += viewportHeight) yTiles.push(y)
+
+    const tiles: { dataUrl: string; x: number; y: number }[] = []
+
+    const captureTile = (scrollX: number, scrollY: number) => new Promise<void>(async (resolve) => {
+      window.scrollTo(scrollX, scrollY)
+      await this.waitForScroll(scrollX, scrollY)
+      await this.sleep(250)
+      const dataUrl: string = await new Promise((res, rej) => {
+        const handler = (message: any) => {
+          if (message.action === 'screenshot-captured' && Math.abs(message.scrollPosition.x - scrollX) < 5 && Math.abs(message.scrollPosition.y - scrollY) < 5) {
+            chrome.runtime.onMessage.removeListener(handler)
+            res(message.dataUrl)
+          } else if (message.action === 'screenshot-error') {
+            chrome.runtime.onMessage.removeListener(handler)
+            rej(new Error(message.error))
+          }
+        }
+        chrome.runtime.onMessage.addListener(handler)
+        chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: scrollX, y: scrollY } })
+      })
+      tiles.push({ dataUrl, x: scrollX, y: scrollY })
+      await this.sleep(650) // rate-limit buffer
+      resolve()
     })
 
-    const cropped = await this.cropDataUrl(dataUrl, rect)
-    // Present interactive options (copy/download) for region capture
-    this.showRegionResultOptions(cropped)
+    for (const y of yTiles) {
+      for (const x of xTiles) {
+        try { await captureTile(x, y) } catch (e) { console.error('Tile capture failed', x, y, e) }
+      }
+    }
+
+    window.scrollTo(original.x, original.y)
+
+    // Compose only the region
+    const canvas = document.createElement('canvas')
+    canvas.width = rect.width
+    canvas.height = rect.height
+    const ctx = canvas.getContext('2d')!
+
+    for (const tile of tiles) {
+      const overlapX1 = Math.max(rect.x, tile.x)
+      const overlapY1 = Math.max(rect.y, tile.y)
+      const overlapX2 = Math.min(rect.x + rect.width, tile.x + viewportWidth)
+      const overlapY2 = Math.min(rect.y + rect.height, tile.y + viewportHeight)
+      const ow = overlapX2 - overlapX1
+      const oh = overlapY2 - overlapY1
+      if (ow <= 0 || oh <= 0) continue
+      const img = new Image()
+      await new Promise((res, rej) => { img.onload = () => res(null); img.onerror = rej; img.src = tile.dataUrl })
+      const sx = (overlapX1 - tile.x) * dpr
+      const sy = (overlapY1 - tile.y) * dpr
+      ctx.drawImage(img, sx, sy, ow * dpr, oh * dpr, overlapX1 - rect.x, overlapY1 - rect.y, ow, oh)
+    }
+
+    const finalDataUrl = canvas.toDataURL('image/png')
+    this.showRegionResultOptions(finalDataUrl)
   }
 
   private async cropDataUrl(dataUrl: string, rect: { x: number; y: number; width: number; height: number }): Promise<string> {
