@@ -2,8 +2,8 @@
   "name": "screenshot-extension",
   "displayName": "Full Page Screenshot",
   "version": "0.0.1",
-  "description": "Capture visible, full page, or region screenshots and copy to clipboard",
-  "author": "Plasmo Corp. <foss@plasmo.com>",
+  "description": "Full page & scrolling screenshots plus region/visible screen capture and quick copy or download.",
+  "author": "Sanket Patel <sanketsohaliya@gmail.com>",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
