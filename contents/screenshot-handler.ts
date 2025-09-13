@@ -20,6 +20,8 @@ class FullPageScreenshot {
   private isCapturing = false
   private useSimpleMode = false // Fallback to single screenshot if rate limited
   public lastCapturedDataUrl: string | null = null
+  private expectedScreenshots = 0 // Track how many screenshots we expect
+  private capturedScreenshots = 0 // Track how many we've received
 
   async captureVisibleArea(): Promise<string | null> {
     if (this.isCapturing) {
@@ -56,12 +58,13 @@ class FullPageScreenshot {
 
   async captureFullPage(copyToClipboard: boolean = true): Promise<string | null> {
     if (this.isCapturing) {
-      console.log("Screenshot capture already in progress")
-      return null
+      console.log("Screenshot capture already in progress, resetting...")
+      this.isCapturing = false // Reset the flag to allow new captures
     }
 
     this.isCapturing = true
     this.screenshots = []
+    this.capturedScreenshots = 0
 
     try {
       // Store original scroll position
@@ -99,43 +102,110 @@ class FullPageScreenshot {
 
       const totalScreenshots = verticalScreenshots * horizontalScreenshots
       console.log(`Will take ${verticalScreenshots}x${horizontalScreenshots} = ${totalScreenshots} screenshots`)
+      console.log(`Loop will go: row 0 to ${verticalScreenshots-1}, col 0 to ${horizontalScreenshots-1}`)
 
-      // Check if we're within reasonable limits to avoid rate limiting
-      if (totalScreenshots > 6) {
-        this.showNotification(`Large page detected. Switching to visible area capture to avoid rate limits.`, "error")
-        await this.sleep(1000)
-        // Fall back to visible area capture
-        const visibleDataUrl = await this.captureVisibleArea()
-        return visibleDataUrl
+      // No artificial limits - capture the entire page regardless of size
+      console.log(`Will capture entire page with ${verticalScreenshots}x${horizontalScreenshots} = ${totalScreenshots} screenshots`)
+      this.showNotification(`Starting full page capture (${totalScreenshots} screenshots)...`, "info")
+
+      // Set expected screenshot count
+      this.expectedScreenshots = totalScreenshots
+
+      // Send progress to popup
+      try {
+        chrome.runtime.sendMessage({
+          action: "capture-progress",
+          message: `Capturing ${totalScreenshots} screenshots...`
+        })
+      } catch (e) {
+        // Popup might be closed, that's ok
       }
 
-      // Capture screenshots by scrolling with rate limiting
-      for (let row = 0; row < verticalScreenshots; row++) {
-        for (let col = 0; col < horizontalScreenshots; col++) {
-          const scrollX = col * viewportWidth
-          const scrollY = row * viewportHeight
+      // Set up a global message handler for this capture session
+      const expectedScreenshots = totalScreenshots
+      let capturedCount = 0
 
-          // Scroll to position
-          window.scrollTo(scrollX, scrollY)
-
-          // Wait for scroll to complete and page to render
-          await this.waitForScroll(scrollX, scrollY)
-          await this.sleep(300) // Wait for rendering
-
-          // Request screenshot from background script
-          await this.captureCurrentView(scrollX, scrollY)
-
-          // Add delay between captures to respect Chrome's rate limit
-          // Chrome allows max 2 captures per second, so wait at least 600ms
-          await this.sleep(700)
+      const globalHandler = (message: any) => {
+        if (message.action === "screenshot-captured" && this.isCapturing) {
+          console.log(`Global handler: Screenshot ${capturedCount + 1}/${expectedScreenshots} captured`)
+          this.screenshots.push({
+            dataUrl: message.dataUrl,
+            scrollPosition: message.scrollPosition,
+            viewportHeight: window.innerHeight,
+            viewportWidth: window.innerWidth
+          })
+          capturedCount++
         }
       }
+
+      chrome.runtime.onMessage.addListener(globalHandler)
+
+      try {
+        // Capture screenshots by scrolling with rate limiting
+        for (let row = 0; row < verticalScreenshots; row++) {
+          console.log(`Starting row ${row}/${verticalScreenshots-1}`)
+          for (let col = 0; col < horizontalScreenshots; col++) {
+            try {
+              const scrollX = col * viewportWidth
+              const scrollY = row * viewportHeight
+
+              console.log(`Processing row ${row}, col ${col}: scrolling to ${scrollX},${scrollY}`)
+
+              // Scroll to position
+              window.scrollTo(scrollX, scrollY)
+
+              // Wait for scroll to complete and page to render
+              await this.waitForScroll(scrollX, scrollY)
+              await this.sleep(300) // Wait for rendering
+
+              // Request screenshot from background script
+              console.log(`Requesting screenshot ${row * horizontalScreenshots + col + 1}/${expectedScreenshots} at ${scrollX},${scrollY}`)
+              chrome.runtime.sendMessage({
+                action: "capture-visible-area",
+                scrollPosition: { x: scrollX, y: scrollY }
+              })
+
+              // Add delay between captures to respect Chrome's rate limit
+              // Chrome allows max 2 captures per second, so wait at least 600ms
+              await this.sleep(700)
+            } catch (error) {
+              console.error(`Error in screenshot loop at row ${row}, col ${col}:`, error)
+              // Continue with next screenshot
+            }
+          }
+          console.log(`Completed row ${row}`)
+        }
+        console.log(`All ${verticalScreenshots} rows completed`)
+
+        // Wait for all screenshots to be captured
+        console.log("Waiting for all screenshots to be captured...")
+        let waitTime = 0
+        while (capturedCount < expectedScreenshots && waitTime < 30000) {
+          await this.sleep(500)
+          waitTime += 500
+          console.log(`Waiting... ${capturedCount}/${expectedScreenshots} captured`)
+        }
+
+        if (capturedCount < expectedScreenshots) {
+          throw new Error(`Timeout: Only captured ${capturedCount}/${expectedScreenshots} screenshots`)
+        }
+
+      } catch (outerError) {
+        console.error("Error in screenshot capture process:", outerError)
+        throw outerError
+      } finally {
+        chrome.runtime.onMessage.removeListener(globalHandler)
+      }
+
+      console.log(`All screenshots captured! Total: ${this.screenshots.length}`)
 
       // Restore original scroll position
       window.scrollTo(this.originalScrollPosition.x, this.originalScrollPosition.y)
 
+      console.log("About to combine screenshots...")
       // Combine screenshots and optionally copy to clipboard
       const dataUrl = await this.combineAndCopyScreenshots(pageWidth, pageHeight, viewportWidth, viewportHeight, copyToClipboard)
+      console.log("Screenshots combined successfully!")
       return dataUrl
 
     } catch (error) {
@@ -174,9 +244,12 @@ class FullPageScreenshot {
       }, 15000) // Increased timeout for rate-limited captures
 
       const messageHandler = (message: any) => {
+        console.log(`Received message:`, message.action, `Expected scroll: ${scrollX},${scrollY}, Got: ${message.scrollPosition?.x},${message.scrollPosition?.y}`)
+
         if (message.action === "screenshot-captured" &&
-            message.scrollPosition.x === scrollX &&
-            message.scrollPosition.y === scrollY) {
+            Math.abs(message.scrollPosition.x - scrollX) <= 5 &&
+            Math.abs(message.scrollPosition.y - scrollY) <= 5) {
+          console.log(`Screenshot matched for position ${scrollX},${scrollY}`)
           clearTimeout(timeout)
           chrome.runtime.onMessage.removeListener(messageHandler)
 
@@ -187,7 +260,10 @@ class FullPageScreenshot {
             viewportWidth: window.innerWidth
           })
 
+          console.log(`Screenshot added to collection. Total: ${this.screenshots.length}`)
           resolve()
+        } else if (message.action === "screenshot-captured") {
+          console.log(`Screenshot position mismatch: expected ${scrollX},${scrollY} but got ${message.scrollPosition?.x},${message.scrollPosition?.y}`)
         } else if (message.action === "screenshot-error") {
           clearTimeout(timeout)
           chrome.runtime.onMessage.removeListener(messageHandler)
@@ -209,6 +285,7 @@ class FullPageScreenshot {
 
       // Request screenshot from background script
       try {
+        console.log(`Requesting screenshot for position ${scrollX},${scrollY}`)
         chrome.runtime.sendMessage({
           action: "capture-visible-area",
           scrollPosition: { x: scrollX, y: scrollY }
@@ -247,10 +324,26 @@ class FullPageScreenshot {
     }
   }
 
+  private downloadImage(dataUrl: string, filename: string) {
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
 
 
   private async tryAlternativeClipboard(dataUrl: string) {
     try {
+      // Ensure document is focused before clipboard operation
+      window.focus()
+      document.body.focus()
+
+      // Wait a moment for focus to take effect
+      await this.sleep(100)
+
       // Create a temporary image element and try to copy it
       const img = new Image()
       img.crossOrigin = "anonymous"
@@ -280,6 +373,8 @@ class FullPageScreenshot {
         }
 
         try {
+          // Double-check focus before clipboard write
+          window.focus()
           await navigator.clipboard.write([
             new ClipboardItem({ "image/png": blob })
           ])
@@ -394,9 +489,11 @@ class FullPageScreenshot {
     // Convert canvas to data URL
     const finalDataUrl = canvas.toDataURL("image/png")
 
-    // Optionally copy to clipboard
+    // For full page screenshots, download the image instead of clipboard (more reliable for large images)
     if (copyToClipboard) {
-      await this.copyToClipboard(finalDataUrl)
+      console.log("Downloading full page screenshot...")
+      this.downloadImage(finalDataUrl, `full-page-screenshot-${Date.now()}.png`)
+      this.showNotification("Full page screenshot downloaded!", "success")
     }
 
     return finalDataUrl
@@ -404,10 +501,30 @@ class FullPageScreenshot {
 
   private async waitForScroll(targetX: number, targetY: number): Promise<void> {
     return new Promise((resolve) => {
+      let attempts = 0
+      const maxAttempts = 60 // Max 1 second at 60fps
+
       const checkScroll = () => {
-        if (Math.abs(window.scrollX - targetX) < 5 && Math.abs(window.scrollY - targetY) < 5) {
+        const currentX = window.scrollX
+        const currentY = window.scrollY
+
+        // Check if we're close enough OR if we've reached the maximum scroll position
+        const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
+        const maxScrollX = Math.max(0, document.documentElement.scrollWidth - window.innerWidth)
+
+        const xMatches = Math.abs(currentX - targetX) < 10 || currentX >= maxScrollX
+        const yMatches = Math.abs(currentY - targetY) < 10 || currentY >= maxScrollY
+
+        console.log(`Scroll check: target(${targetX},${targetY}) current(${currentX},${currentY}) max(${maxScrollX},${maxScrollY}) attempts:${attempts}`)
+
+        if (xMatches && yMatches) {
+          console.log(`Scroll completed: reached target or max scroll position`)
           resolve()
+        } else if (attempts >= maxAttempts) {
+          console.log(`Scroll timeout: giving up after ${maxAttempts} attempts`)
+          resolve() // Don't fail, just continue
         } else {
+          attempts++
           requestAnimationFrame(checkScroll)
         }
       }
@@ -444,7 +561,20 @@ class FullPageScreenshot {
         notification.parentNode.removeChild(notification)
       }
     }, 3000)
+
+    // Also send message to popup if it's open
+    try {
+      if (type === "success" && message.includes("clipboard")) {
+        chrome.runtime.sendMessage({ action: "capture-complete" })
+      } else if (type === "error") {
+        chrome.runtime.sendMessage({ action: "capture-failed", error: message })
+      }
+    } catch (e) {
+      // Popup might be closed, that's ok
+    }
   }
+
+
 }
 
 // Create instance and listen for messages
@@ -456,7 +586,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "capture-full-page") {
     console.log("Starting full page capture...")
-    screenshotHandler.captureFullPage()
+    // Send progress update to popup
+    try {
+      chrome.runtime.sendMessage({ action: "capture-progress", message: "Starting full page capture..." })
+    } catch (e) {
+      // Popup might be closed, that's ok
+    }
+    screenshotHandler.captureFullPage(true) // Enable clipboard copying
   } else if (message.action === "capture-visible-area") {
     console.log("Starting visible area capture...")
     screenshotHandler.captureVisibleArea()
@@ -466,22 +602,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "clipboard-error") {
     console.log("Clipboard copy failed:", message.error)
     screenshotHandler.showNotification("Please click the extension icon and use 'Quick Capture' button for clipboard access", "error")
-  } else if (message.action === "capture-full-page-return-data") {
-    console.log("Content script received full page capture request for popup")
-
-    // Capture full page and return data directly (no clipboard copy)
-    screenshotHandler.captureFullPage(false).then(dataUrl => {
-      if (dataUrl) {
-        sendResponse({ success: true, dataUrl: dataUrl })
-      } else {
-        sendResponse({ success: false, error: "Full page capture failed" })
-      }
-    }).catch(error => {
-      console.error("Full page capture for popup failed:", error)
-      sendResponse({ success: false, error: error.message })
-    })
-
-    return true // Keep message channel open for async response
   }
 })
 

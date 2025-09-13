@@ -1,8 +1,33 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 function IndexPopup() {
   const [isCapturing, setIsCapturing] = useState(false)
   const [status, setStatus] = useState("")
+
+  // Listen for messages from content script
+  useEffect(() => {
+    const messageListener = (message: any) => {
+      if (message.action === "capture-complete") {
+        setIsCapturing(false)
+        setStatus("✅ Screenshot captured and copied to clipboard!")
+        // Close popup after success
+        setTimeout(() => {
+          window.close()
+        }, 2000)
+      } else if (message.action === "capture-failed") {
+        setIsCapturing(false)
+        setStatus("❌ Capture failed: " + (message.error || "Unknown error"))
+      } else if (message.action === "capture-progress") {
+        setStatus(message.message || "Capturing...")
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(messageListener)
+
+    return () => {
+      chrome.runtime.onMessage.removeListener(messageListener)
+    }
+  }, [])
 
   const testClipboard = async () => {
     try {
@@ -64,38 +89,53 @@ function IndexPopup() {
         // Capture the visible area directly
         dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' })
       } else {
-        // For full page, we'll use the background script but handle clipboard in popup
+        // For full page, we'll send a message to trigger the existing full page capture
         setStatus("Initiating full page capture...")
 
-        // Send message to background script for full page capture
-        const response = await chrome.runtime.sendMessage({
-          action: "capture-full-page-for-popup",
-          tabId: activeTab.id
-        })
+        try {
+          // Send message to background script to start full page capture
+          await chrome.runtime.sendMessage({ action: "capture-full-page" })
 
-        if (!response?.success || !response?.dataUrl) {
-          throw new Error(response?.error || "Full page capture failed")
+          setStatus("Full page capture in progress... This may take a moment for large pages.")
+
+          // Don't close popup immediately - let the user see the progress
+          // The content script will handle the capture and clipboard copying
+
+          return null // Don't try to copy to clipboard here, the content script will handle it
+
+        } catch (error) {
+          console.error("Full page capture error:", error)
+
+          if (error.message.includes("Could not establish connection")) {
+            setStatus("❌ Please refresh the page and try again. The extension needs to load on the page first.")
+          } else {
+            setStatus("❌ Full page capture failed: " + error.message)
+          }
+
+          return null
         }
-
-        dataUrl = response.dataUrl
       }
 
-      setStatus("Copying to clipboard...")
+      // Only copy to clipboard if we have dataUrl (visible area capture)
+      if (dataUrl) {
+        setStatus("Copying to clipboard...")
 
-      // Convert to blob and copy to clipboard directly in popup
-      const response = await fetch(dataUrl)
-      const blob = await response.blob()
+        // Convert to blob and copy to clipboard directly in popup
+        const response = await fetch(dataUrl)
+        const blob = await response.blob()
 
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob })
-      ])
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ])
 
-      setStatus("✅ Screenshot copied to clipboard!")
+        setStatus("✅ Screenshot copied to clipboard!")
 
-      // Close popup after success
-      setTimeout(() => {
-        window.close()
-      }, 2000)
+        // Close popup after success
+        setTimeout(() => {
+          window.close()
+        }, 2000)
+      }
+      // For full page capture, the popup already closed and content script handles clipboard
 
     } catch (error) {
       console.error("Direct capture error:", error)
@@ -117,7 +157,8 @@ function IndexPopup() {
       </h2>
 
       <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: "#666" }}>
-        Capture screenshots with reliable clipboard copying. Choose visible area for quick capture or full page for complete screenshots.
+        <strong>📸 Visible Area:</strong> Instant capture & clipboard copy<br/>
+        <strong>📄 Full Page:</strong> Complete page capture (refresh page if error occurs)
       </p>
 
       <div style={{ marginBottom: "16px" }}>

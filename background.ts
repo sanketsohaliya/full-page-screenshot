@@ -41,11 +41,15 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         return
       }
 
-      // The content script is already registered in manifest, so we don't need to inject it
-      // Just send the message directly
-
-      // Send message to content script to start screenshot process
-      chrome.tabs.sendMessage(activeTab.id, { action: "capture-full-page" })
+      // Try to send message to content script
+      try {
+        await chrome.tabs.sendMessage(activeTab.id, { action: "capture-full-page" })
+      } catch (contentScriptError) {
+        console.log("Content script not loaded, user needs to refresh the page")
+        console.error("Content script error:", contentScriptError)
+        // The content script needs to be loaded by refreshing the page
+        // We can't inject it dynamically because the file path is different in Plasmo
+      }
 
     } catch (error) {
       console.error("Error capturing screenshot:", error)
@@ -122,40 +126,6 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         })
       }
     }
-  } else if (message.action === "capture-full-page-for-popup") {
-    console.log("Background script received full page capture request for popup")
-
-    try {
-      const tabId = message.tabId || sender.tab?.id
-
-      if (!tabId) {
-        sendResponse({ success: false, error: "No tab ID provided" })
-        return
-      }
-
-      // Inject and execute the screenshot handler
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ["contents/screenshot-handler.js"]
-      })
-
-      // Send message to content script to start full page capture
-      const response = await chrome.tabs.sendMessage(tabId, {
-        action: "capture-full-page-return-data"
-      })
-
-      if (response?.success && response?.dataUrl) {
-        sendResponse({ success: true, dataUrl: response.dataUrl })
-      } else {
-        sendResponse({ success: false, error: response?.error || "Full page capture failed" })
-      }
-
-    } catch (error) {
-      console.error("Full page capture for popup failed:", error)
-      sendResponse({ success: false, error: error.message })
-    }
-
-    return true // Keep message channel open for async response
   }
 })
 
