@@ -22,6 +22,7 @@ class FullPageScreenshot {
   public lastCapturedDataUrl: string | null = null
   private expectedScreenshots = 0 // Track how many screenshots we expect
   private capturedScreenshots = 0 // Track how many we've received
+  private progressOverlay?: { update: (count:number,total:number)=>void; remove:()=>void }
 
   async captureVisibleArea(): Promise<string | null> {
     if (this.isCapturing) {
@@ -111,6 +112,13 @@ class FullPageScreenshot {
       // Set expected screenshot count
       this.expectedScreenshots = totalScreenshots
 
+      // Initialize progress overlay (playful dot eater). Avoid trademark imagery; use generic emoji.
+      try {
+        this.progressOverlay = this.showProgressOverlay(totalScreenshots)
+      } catch(e) {
+        console.warn('Progress overlay failed to initialize', e)
+      }
+
       // Send progress to popup
       try {
         chrome.runtime.sendMessage({
@@ -135,6 +143,7 @@ class FullPageScreenshot {
             viewportWidth: window.innerWidth
           })
           capturedCount++
+          try { this.progressOverlay?.update(capturedCount, expectedScreenshots) } catch(_) {}
         }
       }
 
@@ -197,14 +206,16 @@ class FullPageScreenshot {
         chrome.runtime.onMessage.removeListener(globalHandler)
       }
 
-      console.log(`All screenshots captured! Total: ${this.screenshots.length}`)
+  console.log(`All screenshots captured! Total: ${this.screenshots.length}`)
+  // Force final 100% progress update before combining
+  try { this.progressOverlay?.update(this.expectedScreenshots, this.expectedScreenshots) } catch(_) {}
 
       // Restore original scroll position
       window.scrollTo(this.originalScrollPosition.x, this.originalScrollPosition.y)
 
       console.log("About to combine screenshots...")
       // Combine screenshots and optionally copy to clipboard
-      const dataUrl = await this.combineAndCopyScreenshots(pageWidth, pageHeight, viewportWidth, viewportHeight, copyToClipboard)
+  const dataUrl = await this.combineAndCopyScreenshots(pageWidth, pageHeight, viewportWidth, viewportHeight, copyToClipboard)
       console.log("Screenshots combined successfully!")
       return dataUrl
 
@@ -234,7 +245,80 @@ class FullPageScreenshot {
       }
     } finally {
       this.isCapturing = false
+      // Delay removal slightly so user perceives 100% state
+      try {
+        if (this.progressOverlay) {
+          const ref = this.progressOverlay
+          setTimeout(()=>{ try { ref.remove() } catch(_) {} }, 450)
+        }
+      } catch(_) {}
     }
+  }
+
+  private showProgressOverlay(total: number) {
+    // Cap displayed dots to a reasonable number
+    const maxDots = 40
+    const useDots = Math.min(total, maxDots)
+    const overlay = document.createElement('div')
+    overlay.setAttribute('data-screenshot-progress','')
+    overlay.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483646;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;pointer-events:none;'
+    const panel = document.createElement('div')
+    panel.style.cssText = 'background:rgba(17,20,22,.88);backdrop-filter:blur(6px);padding:10px 14px 12px;border:1px solid #1e2429;border-radius:14px;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:220px;box-shadow:0 4px 18px rgba(0,0,0,.45);'
+    const title = document.createElement('div')
+    title.textContent = 'Capturing full page…'
+    title.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:.3px;color:#e7eaec;'
+  const meterWrap = document.createElement('div')
+  meterWrap.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;width:100%;'
+  const dotsRow = document.createElement('div')
+  dotsRow.style.cssText = 'display:flex;gap:4px;flex-wrap:nowrap;'
+    const dots: HTMLSpanElement[] = []
+    for (let i=0;i<useDots;i++) {
+      const s = document.createElement('span')
+      s.style.cssText = 'width:8px;height:8px;border-radius:50%;background:#232a30;display:inline-block;transition:background .25s, transform .25s'
+      dots.push(s); dotsRow.appendChild(s)
+    }
+    meterWrap.append(dotsRow)
+    const pct = document.createElement('div')
+    pct.style.cssText = 'font-size:11px;color:#7f8a93;letter-spacing:.2px;min-height:14px;'
+    panel.append(title, meterWrap, pct)
+    overlay.append(panel)
+    document.body.appendChild(overlay)
+
+    const update = (count:number, total:number) => {
+      if (total <= 0) return
+      const ratio = count / total
+      // Floor mapping for more intuitive step progression
+      const dotsToFill = Math.floor(ratio * useDots)
+      for (let i=0; i<useDots; i++) {
+        if (i < dotsToFill) {
+          dots[i].style.background = '#3b82f6'
+          dots[i].style.transform = 'scale(1.18)'
+        } else {
+          dots[i].style.background = '#232a30'
+          dots[i].style.transform = 'scale(1)'
+        }
+      }
+      if (useDots > 0 && count >= total) {
+        // Replace last dot with a check indicator
+        const last = dots[useDots - 1]
+        last.style.background = '#16a34a'
+        last.style.transform = 'scale(1.25)'
+        last.innerHTML = ''
+        last.style.display = 'flex'
+        last.style.alignItems = 'center'
+        last.style.justifyContent = 'center'
+        last.style.color = '#fff'
+        last.style.fontSize = '8px'
+        last.textContent = '✓'
+      }
+      pct.textContent = count >= total ? 'Combining screenshots…' : `${count}/${total} (${Math.round(ratio * 100)}%)`
+    }
+
+  const remove = () => { overlay.remove() }
+
+    // Initial state
+    update(0,total)
+    return { update, remove }
   }
 
   private async captureCurrentView(scrollX: number, scrollY: number): Promise<void> {
