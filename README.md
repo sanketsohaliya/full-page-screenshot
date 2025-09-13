@@ -1,33 +1,111 @@
-This is a [Plasmo extension](https://docs.plasmo.com/) project bootstrapped with [`plasmo init`](https://www.npmjs.com/package/plasmo).
+# Full Page Screenshot Extension
 
-## Getting Started
+A Chrome extension built with Plasmo that captures full page screenshots with keyboard shortcuts and copies them to the clipboard.
 
-First, run the development server:
+## Features
 
-```bash
-pnpm dev
-# or
-npm run dev
+- 📸 **Full Page Screenshots**: Captures the entire webpage, including content that requires scrolling
+- ⌨️ **Keyboard Shortcut**: Quick capture with `Ctrl+Shift+S` (or `Cmd+Shift+S` on Mac)
+- 📋 **Clipboard Integration**: Automatically copies screenshots to clipboard for easy sharing
+- 🖱️ **Popup Interface**: Alternative capture method through extension popup
+- 🔄 **Smart Scrolling**: Handles both horizontal and vertical scrolling automatically
+
+## Installation
+
+### Development Mode
+
+1. Clone this repository
+2. Install dependencies:
+   ```bash
+   pnpm install
+   # or
+   npm install
+   ```
+
+3. Start the development server:
+   ```bash
+   pnpm dev
+   # or
+   npm run dev
+   ```
+
+4. Load the extension in Chrome:
+   - Open Chrome and go to `chrome://extensions/`
+   - Enable "Developer mode" (toggle in top right)
+   - Click "Load unpacked"
+   - Select the `build/chrome-mv3-dev` folder
+
+### Production Build
+
+1. Build the extension:
+   ```bash
+   pnpm build
+   # or
+   npm run build
+   ```
+
+2. Load the extension from `build/chrome-mv3-prod` folder
+
+## Usage
+
+### Method 1: Keyboard Shortcut (Recommended)
+- Press `Ctrl+Shift+S` (Windows/Linux) or `Cmd+Shift+S` (Mac)
+- The extension will automatically scroll through the page and capture everything
+- Screenshot will be copied to clipboard when complete
+
+### Method 2: Extension Popup
+- Click the extension icon in the toolbar
+- Click "Capture Screenshot" button
+- Wait for the capture process to complete
+
+## How It Works
+
+1. **Trigger**: User activates via keyboard shortcut or popup button
+2. **Injection**: Background script injects content script into active tab
+3. **Analysis**: Content script analyzes page dimensions and viewport size
+4. **Capture**: Systematically scrolls and captures visible areas using Chrome's `captureVisibleTab` API
+5. **Combine**: Stitches individual screenshots into a single full-page image
+6. **Clipboard**: Copies the final image to system clipboard
+
+## Technical Details
+
+- **Framework**: [Plasmo](https://docs.plasmo.com/)
+- **Manifest**: Chrome Extension Manifest V3
+- **Permissions**: `activeTab`, `tabs`, `clipboardWrite`, `scripting`
+- **APIs Used**: Chrome Commands, Tabs, Scripting, and Clipboard APIs
+
+## File Structure
+
+```
+├── background.ts              # Background script handling shortcuts and coordination
+├── contents/
+│   └── screenshot-handler.ts  # Content script for page interaction and capture
+├── popup.tsx                  # Extension popup interface
+├── package.json              # Project configuration and permissions
+└── test-page.html            # Test page for development
 ```
 
-Open your browser and load the appropriate development build. For example, if you are developing for the chrome browser, using manifest v3, use: `build/chrome-mv3-dev`.
+## Testing
 
-You can start editing the popup by modifying `popup.tsx`. It should auto-update as you make changes. To add an options page, simply add a `options.tsx` file to the root of the project, with a react component default exported. Likewise to add a content page, add a `content.ts` file to the root of the project, importing some module and do some logic, then reload the extension on your browser.
+1. Open the included `test-page.html` in your browser
+2. Load the extension in development mode
+3. Test both keyboard shortcut and popup methods
+4. Verify the screenshot includes all sections (tall, wide, and colorful content)
 
-For further guidance, [visit our Documentation](https://docs.plasmo.com/)
+## Troubleshooting
 
-## Making production build
+- **Permission Issues**: Ensure all required permissions are granted in `chrome://extensions/`
+- **Clipboard Not Working**: Check if the page has HTTPS (required for clipboard API)
+- **Incomplete Screenshots**: Verify the page has finished loading before capturing
+- **Extension Not Loading**: Check the console in `chrome://extensions/` for error messages
 
-Run the following:
+## Development
 
-```bash
-pnpm build
-# or
-npm run build
-```
+This project uses Plasmo for Chrome extension development. Key files:
 
-This should create a production bundle for your extension, ready to be zipped and published to the stores.
+- Modify `popup.tsx` for UI changes
+- Update `background.ts` for background script logic
+- Edit `contents/screenshot-handler.ts` for capture functionality
+- Adjust permissions in `package.json` manifest section
 
-## Submit to the webstores
-
-The easiest way to deploy your Plasmo extension is to use the built-in [bpp](https://bpp.browser.market) GitHub action. Prior to using this action however, make sure to build your extension and upload the first version to the store to establish the basic credentials. Then, simply follow [this setup instruction](https://docs.plasmo.com/framework/workflows/submit) and you should be on your way for automated submission!
+For more information, visit the [Plasmo Documentation](https://docs.plasmo.com/)

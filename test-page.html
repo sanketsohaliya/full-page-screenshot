@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screenshot Extension Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .section {
+            margin-bottom: 50px;
+            padding: 20px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        .tall-section {
+            height: 800px;
+            background: linear-gradient(45deg, #f0f0f0, #e0e0e0);
+        }
+        .wide-section {
+            width: 150%;
+            background: linear-gradient(90deg, #ffe0e0, #e0ffe0, #e0e0ff);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #666;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 10px;
+        }
+        .instructions {
+            background: #f9f9f9;
+            padding: 15px;
+            border-left: 4px solid #4CAF50;
+            margin: 20px 0;
+        }
+        .color-box {
+            width: 100px;
+            height: 100px;
+            display: inline-block;
+            margin: 10px;
+            border: 2px solid #333;
+        }
+        .red { background: #ff4444; }
+        .green { background: #44ff44; }
+        .blue { background: #4444ff; }
+        .yellow { background: #ffff44; }
+        .purple { background: #ff44ff; }
+        .orange { background: #ff8844; }
+    </style>
+</head>
+<body>
+    <h1>Screenshot Extension Test Page</h1>
+    
+    <div class="instructions">
+        <h3>How to test the extension:</h3>
+        <ol>
+            <li>Load the extension in Chrome (chrome://extensions/)</li>
+            <li>Enable Developer mode and click "Load unpacked"</li>
+            <li>Select the <code>hunt-melodic-duck/build/chrome-mv3-dev</code> folder</li>
+            <li>Use the keyboard shortcut <strong>Ctrl+Shift+S</strong> (or Cmd+Shift+S on Mac)</li>
+            <li>Or click the extension icon and use the "Capture Screenshot" button</li>
+            <li>The screenshot should be copied to your clipboard automatically</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>Section 1: Normal Content</h2>
+        <p>This is a regular section with normal text content. The screenshot extension should capture this along with all other content on the page.</p>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+    </div>
+
+    <div class="section tall-section">
+        <h2>Section 2: Tall Content</h2>
+        <p>This section is very tall (800px) to test vertical scrolling during screenshot capture.</p>
+        <p>The extension should scroll through the entire page to capture all content, including this tall section.</p>
+        <div style="margin-top: 300px;">
+            <p>This text is in the middle of the tall section.</p>
+        </div>
+        <div style="margin-top: 300px;">
+            <p>This text is at the bottom of the tall section.</p>
+        </div>
+    </div>
+
+    <div class="section wide-section">
+        <h2>Section 3: Wide Content</h2>
+        <p>This section is wider than the viewport (150% width) to test horizontal scrolling.</p>
+        <p>The extension should handle both horizontal and vertical scrolling to capture the complete page.</p>
+        <div style="margin-left: 50%;">
+            <p>This text is positioned to the right, requiring horizontal scrolling to see completely.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Section 4: Colorful Content</h2>
+        <p>This section contains colorful boxes to make it easy to verify the screenshot quality:</p>
+        <div>
+            <div class="color-box red"></div>
+            <div class="color-box green"></div>
+            <div class="color-box blue"></div>
+            <div class="color-box yellow"></div>
+            <div class="color-box purple"></div>
+            <div class="color-box orange"></div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Section 5: Final Section</h2>
+        <p>This is the final section at the bottom of the page. If you can see this in the screenshot, the full page capture worked correctly!</p>
+        <p>The screenshot should include everything from the top title to this bottom section.</p>
+    </div>
+
+    <script>
+        // Add some dynamic content to test
+        document.addEventListener('DOMContentLoaded', function() {
+            const timestamp = new Date().toLocaleString();
+            const timestampElement = document.createElement('div');
+            timestampElement.innerHTML = `<p><strong>Page loaded at:</strong> ${timestamp}</p>`;
+            timestampElement.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(255,255,255,0.9); padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; z-index: 1000;';
+            document.body.appendChild(timestampElement);
+        });
+    </script>
+</body>
+</html>

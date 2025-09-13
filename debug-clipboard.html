@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clipboard Debug Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .debug-section {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+        .success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+        .warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f1f1f1;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .test-image {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Clipboard Debug Tool</h1>
+    
+    <div class="debug-section">
+        <h2>Environment Check</h2>
+        <div id="env-check">Checking environment...</div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Permission Tests</h2>
+        <button onclick="checkPermissions()">Check Clipboard Permissions</button>
+        <button onclick="requestPermissions()">Request Permissions</button>
+        <div id="permission-results"></div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Clipboard API Tests</h2>
+        <button onclick="testTextWrite()">Test Text Write</button>
+        <button onclick="testImageWrite()">Test Image Write</button>
+        <button onclick="testRead()">Test Read</button>
+        <div id="api-results"></div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Screenshot Simulation</h2>
+        <div class="test-image" id="testImage"></div>
+        <button onclick="simulateScreenshotCopy()">Simulate Screenshot Copy</button>
+        <div id="screenshot-results"></div>
+    </div>
+
+    <div class="debug-section">
+        <h2>Debug Log</h2>
+        <button onclick="clearLog()">Clear Log</button>
+        <pre id="debug-log"></pre>
+    </div>
+
+    <script>
+        let debugLog = [];
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
+            debugLog.push(logEntry);
+            
+            const logElement = document.getElementById('debug-log');
+            logElement.textContent = debugLog.join('\n');
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(logEntry);
+        }
+
+        function clearLog() {
+            debugLog = [];
+            document.getElementById('debug-log').textContent = '';
+        }
+
+        // Environment check
+        function checkEnvironment() {
+            const results = document.getElementById('env-check');
+            let html = '';
+            
+            // Protocol check
+            const isSecure = location.protocol === 'https:' || location.protocol === 'file:';
+            html += `<p><strong>Protocol:</strong> ${location.protocol} ${isSecure ? '✅' : '❌'}</p>`;
+            
+            // Clipboard API availability
+            const hasClipboard = !!navigator.clipboard;
+            html += `<p><strong>Clipboard API:</strong> ${hasClipboard ? 'Available ✅' : 'Not Available ❌'}</p>`;
+            
+            if (hasClipboard) {
+                html += `<p><strong>clipboard.write:</strong> ${typeof navigator.clipboard.write === 'function' ? 'Available ✅' : 'Not Available ❌'}</p>`;
+                html += `<p><strong>clipboard.read:</strong> ${typeof navigator.clipboard.read === 'function' ? 'Available ✅' : 'Not Available ❌'}</p>`;
+            }
+            
+            // User agent
+            html += `<p><strong>User Agent:</strong> ${navigator.userAgent}</p>`;
+            
+            results.innerHTML = html;
+            log(`Environment check completed. Secure: ${isSecure}, Clipboard: ${hasClipboard}`);
+        }
+
+        async function checkPermissions() {
+            const results = document.getElementById('permission-results');
+            let html = '';
+            
+            try {
+                // Check clipboard-write permission
+                try {
+                    const writePermission = await navigator.permissions.query({name: 'clipboard-write'});
+                    html += `<p><strong>clipboard-write:</strong> ${writePermission.state} ${writePermission.state === 'granted' ? '✅' : '⚠️'}</p>`;
+                    log(`Clipboard write permission: ${writePermission.state}`);
+                } catch (e) {
+                    html += `<p><strong>clipboard-write:</strong> Query not supported</p>`;
+                    log(`Clipboard write permission query failed: ${e.message}`);
+                }
+                
+                // Check clipboard-read permission
+                try {
+                    const readPermission = await navigator.permissions.query({name: 'clipboard-read'});
+                    html += `<p><strong>clipboard-read:</strong> ${readPermission.state} ${readPermission.state === 'granted' ? '✅' : '⚠️'}</p>`;
+                    log(`Clipboard read permission: ${readPermission.state}`);
+                } catch (e) {
+                    html += `<p><strong>clipboard-read:</strong> Query not supported</p>`;
+                    log(`Clipboard read permission query failed: ${e.message}`);
+                }
+                
+            } catch (error) {
+                html += `<p class="error">Error checking permissions: ${error.message}</p>`;
+                log(`Permission check error: ${error.message}`, 'error');
+            }
+            
+            results.innerHTML = html;
+        }
+
+        async function requestPermissions() {
+            log('Attempting to request clipboard permissions...');
+            // Note: There's no direct way to request clipboard permissions
+            // They are typically granted through user interaction
+            alert('Clipboard permissions are granted automatically when you interact with the clipboard API. Try the test buttons below.');
+        }
+
+        async function testTextWrite() {
+            const results = document.getElementById('api-results');
+            log('Testing text write to clipboard...');
+            
+            try {
+                await navigator.clipboard.writeText('Test clipboard write - ' + new Date().toISOString());
+                results.innerHTML += '<p class="success">✅ Text write successful</p>';
+                log('Text write successful', 'success');
+            } catch (error) {
+                results.innerHTML += `<p class="error">❌ Text write failed: ${error.name} - ${error.message}</p>`;
+                log(`Text write failed: ${error.name} - ${error.message}`, 'error');
+            }
+        }
+
+        async function testImageWrite() {
+            const results = document.getElementById('api-results');
+            log('Testing image write to clipboard...');
+            
+            try {
+                // Create a simple test image
+                const canvas = document.createElement('canvas');
+                canvas.width = 100;
+                canvas.height = 100;
+                const ctx = canvas.getContext('2d');
+                
+                // Draw a simple pattern
+                ctx.fillStyle = '#ff6b6b';
+                ctx.fillRect(0, 0, 50, 50);
+                ctx.fillStyle = '#4ecdc4';
+                ctx.fillRect(50, 50, 50, 50);
+                
+                // Convert to blob and copy
+                canvas.toBlob(async (blob) => {
+                    try {
+                        await navigator.clipboard.write([
+                            new ClipboardItem({ 'image/png': blob })
+                        ]);
+                        results.innerHTML += '<p class="success">✅ Image write successful</p>';
+                        log('Image write successful', 'success');
+                    } catch (error) {
+                        results.innerHTML += `<p class="error">❌ Image write failed: ${error.name} - ${error.message}</p>`;
+                        log(`Image write failed: ${error.name} - ${error.message}`, 'error');
+                    }
+                }, 'image/png');
+                
+            } catch (error) {
+                results.innerHTML += `<p class="error">❌ Image write setup failed: ${error.message}</p>`;
+                log(`Image write setup failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testRead() {
+            const results = document.getElementById('api-results');
+            log('Testing clipboard read...');
+            
+            try {
+                const clipboardItems = await navigator.clipboard.read();
+                results.innerHTML += `<p class="success">✅ Read successful. Items: ${clipboardItems.length}</p>`;
+                log(`Read successful. Items: ${clipboardItems.length}`, 'success');
+                
+                for (let i = 0; i < clipboardItems.length; i++) {
+                    const item = clipboardItems[i];
+                    log(`Item ${i}: types = ${item.types.join(', ')}`);
+                }
+            } catch (error) {
+                results.innerHTML += `<p class="error">❌ Read failed: ${error.name} - ${error.message}</p>`;
+                log(`Read failed: ${error.name} - ${error.message}`, 'error');
+            }
+        }
+
+        async function simulateScreenshotCopy() {
+            const results = document.getElementById('screenshot-results');
+            log('Simulating screenshot copy process...');
+            
+            try {
+                // Create a data URL similar to what the extension would create
+                const canvas = document.createElement('canvas');
+                canvas.width = 200;
+                canvas.height = 150;
+                const ctx = canvas.getContext('2d');
+                
+                // Draw a mock screenshot
+                ctx.fillStyle = '#f0f0f0';
+                ctx.fillRect(0, 0, 200, 150);
+                ctx.fillStyle = '#333';
+                ctx.font = '16px Arial';
+                ctx.fillText('Mock Screenshot', 50, 75);
+                
+                const dataUrl = canvas.toDataURL('image/png');
+                log(`Created data URL: ${dataUrl.substring(0, 50)}...`);
+                
+                // Convert to blob and copy (same as extension)
+                const response = await fetch(dataUrl);
+                const blob = await response.blob();
+                log(`Created blob: ${blob.size} bytes, type: ${blob.type}`);
+                
+                await navigator.clipboard.write([
+                    new ClipboardItem({ 'image/png': blob })
+                ]);
+                
+                results.innerHTML += '<p class="success">✅ Screenshot simulation successful!</p>';
+                log('Screenshot simulation successful', 'success');
+                
+            } catch (error) {
+                results.innerHTML += `<p class="error">❌ Screenshot simulation failed: ${error.name} - ${error.message}</p>`;
+                log(`Screenshot simulation failed: ${error.name} - ${error.message}`, 'error');
+                
+                // Log detailed error information
+                if (error instanceof DOMException) {
+                    log(`DOMException details: name=${error.name}, code=${error.code}, message=${error.message}`, 'error');
+                }
+            }
+        }
+
+        // Run environment check on load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkEnvironment();
+            log('Debug tool loaded');
+        });
+    </script>
+</body>
+</html>
