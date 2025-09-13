@@ -333,6 +333,305 @@ class FullPageScreenshot {
     document.body.removeChild(link)
   }
 
+  private showInteractiveClipboardOption(dataUrl: string) {
+    // Create overlay
+    const overlay = document.createElement('div')
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `
+
+    // Create dialog
+    const dialog = document.createElement('div')
+    dialog.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      max-width: 400px;
+      margin: 20px;
+    `
+
+    // Create content
+    dialog.innerHTML = `
+      <h3 style="margin: 0 0 20px 0; color: #333; font-size: 18px;">Full Page Screenshot Ready!</h3>
+      <p style="margin: 0 0 25px 0; color: #666; line-height: 1.5;">
+        Click the button below to copy the screenshot to your clipboard:
+      </p>
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button id="copyBtn" style="
+          background: #007AFF;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        ">📋 Copy to Clipboard</button>
+        <button id="downloadBtn" style="
+          background: #34C759;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        ">💾 Download</button>
+        <button id="closeBtn" style="
+          background: #FF3B30;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        ">✕ Close</button>
+      </div>
+    `
+
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    // Add event listeners
+    const copyBtn = dialog.querySelector('#copyBtn') as HTMLButtonElement
+    const downloadBtn = dialog.querySelector('#downloadBtn') as HTMLButtonElement
+    const closeBtn = dialog.querySelector('#closeBtn') as HTMLButtonElement
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        copyBtn.textContent = '⏳ Copying...'
+        copyBtn.disabled = true
+
+        // User interaction triggered clipboard - this should work!
+        await this.copyImageDirectlyToClipboard(dataUrl)
+
+        copyBtn.textContent = '✅ Copied!'
+        copyBtn.style.background = '#34C759'
+
+        setTimeout(() => {
+          document.body.removeChild(overlay)
+          this.showNotification("Full page screenshot copied to clipboard!", "success")
+        }, 1000)
+
+      } catch (error) {
+        console.error('Interactive clipboard failed:', error)
+        copyBtn.textContent = '❌ Failed'
+        copyBtn.style.background = '#FF3B30'
+
+        setTimeout(() => {
+          copyBtn.textContent = '📋 Copy to Clipboard'
+          copyBtn.style.background = '#007AFF'
+          copyBtn.disabled = false
+        }, 2000)
+      }
+    })
+
+    downloadBtn.addEventListener('click', () => {
+      this.downloadImage(dataUrl, `full-page-screenshot-${Date.now()}.png`)
+      document.body.removeChild(overlay)
+      this.showNotification("Full page screenshot downloaded!", "success")
+    })
+
+    closeBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay)
+    })
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        document.body.removeChild(overlay)
+      }
+    })
+  }
+
+  private async copyImageDirectlyToClipboard(dataUrl: string): Promise<void> {
+    console.log(`Copying image to clipboard - dataUrl length: ${dataUrl.length}`)
+    console.log(`DataUrl preview: ${dataUrl.substring(0, 100)}...`)
+
+    // Convert to blob
+    const response = await fetch(dataUrl)
+    let blob = await response.blob()
+
+    console.log(`Original blob size: ${(blob.size / (1024 * 1024)).toFixed(2)} MB`)
+    console.log(`Original blob type: ${blob.type}`)
+
+    // Compress if too large
+    if (blob.size > 8 * 1024 * 1024) {
+      console.log("Compressing large image for clipboard...")
+      const compressedDataUrl = await this.compressImageForClipboard(dataUrl, blob.size / (1024 * 1024))
+      const compressedResponse = await fetch(compressedDataUrl)
+      blob = await compressedResponse.blob()
+      console.log(`Compressed blob size: ${(blob.size / (1024 * 1024)).toFixed(2)} MB`)
+    }
+
+    console.log(`About to copy blob of size ${blob.size} bytes to clipboard`)
+
+    // Copy to clipboard (user interaction context)
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob })
+    ])
+
+    console.log("Successfully copied to clipboard!")
+  }
+
+  private showDebugImage(dataUrl: string, width: number, height: number) {
+    // Create a small preview image to verify the combination worked
+    const debugImg = document.createElement('img')
+    debugImg.src = dataUrl
+    debugImg.style.cssText = `
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      max-width: 200px;
+      max-height: 300px;
+      border: 2px solid red;
+      z-index: 9999;
+      background: white;
+    `
+    debugImg.title = `Combined image: ${width}x${height}`
+
+    document.body.appendChild(debugImg)
+
+    // Remove after 5 seconds
+    setTimeout(() => {
+      if (debugImg.parentNode) {
+        document.body.removeChild(debugImg)
+      }
+    }, 5000)
+
+    console.log("Debug image shown in top-right corner for 5 seconds")
+  }
+
+  private async copyLargeImageToClipboard(dataUrl: string): Promise<void> {
+    // Ensure document focus before any clipboard operation
+    await this.ensureDocumentFocus()
+
+    // Convert dataUrl to blob to check size
+    const response = await fetch(dataUrl)
+    const originalBlob = await response.blob()
+    const originalSizeMB = originalBlob.size / (1024 * 1024)
+
+    console.log(`Original image size: ${originalSizeMB.toFixed(2)} MB`)
+
+    // If image is larger than 8MB, compress it
+    if (originalSizeMB > 8) {
+      console.log("Image too large for clipboard, compressing...")
+      const compressedDataUrl = await this.compressImageForClipboard(dataUrl, originalSizeMB)
+      const compressedResponse = await fetch(compressedDataUrl)
+      const compressedBlob = await compressedResponse.blob()
+      const compressedSizeMB = compressedBlob.size / (1024 * 1024)
+
+      console.log(`Compressed image size: ${compressedSizeMB.toFixed(2)} MB`)
+
+      // Ensure focus again before clipboard write
+      await this.ensureDocumentFocus()
+
+      // Copy compressed image to clipboard
+      await navigator.clipboard.write([
+        new ClipboardItem({ [compressedBlob.type]: compressedBlob })
+      ])
+    } else {
+      // Image is small enough, copy directly
+      console.log("Image size acceptable, copying directly to clipboard")
+
+      // Ensure focus again before clipboard write
+      await this.ensureDocumentFocus()
+
+      await navigator.clipboard.write([
+        new ClipboardItem({ [originalBlob.type]: originalBlob })
+      ])
+    }
+  }
+
+  private async ensureDocumentFocus(): Promise<void> {
+    // Multiple focus attempts to ensure document is focused
+    window.focus()
+    document.body.focus()
+
+    // Click on the document to ensure focus
+    const clickEvent = new MouseEvent('click', {
+      view: window,
+      bubbles: true,
+      cancelable: true
+    })
+    document.body.dispatchEvent(clickEvent)
+
+    // Wait for focus to take effect
+    await this.sleep(200)
+
+    // Verify focus
+    if (!document.hasFocus()) {
+      console.log("Document still not focused, trying alternative focus method...")
+
+      // Create a temporary input element and focus it
+      const tempInput = document.createElement('input')
+      tempInput.style.position = 'fixed'
+      tempInput.style.top = '-1000px'
+      tempInput.style.opacity = '0'
+      document.body.appendChild(tempInput)
+      tempInput.focus()
+      await this.sleep(100)
+      document.body.removeChild(tempInput)
+    }
+
+    console.log(`Document focus status: ${document.hasFocus()}`)
+  }
+
+  private async compressImageForClipboard(dataUrl: string, originalSizeMB: number): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')!
+
+        // Calculate compression ratio based on original size
+        let compressionRatio = 1
+        if (originalSizeMB > 20) {
+          compressionRatio = 0.4  // Aggressive compression for very large images
+        } else if (originalSizeMB > 15) {
+          compressionRatio = 0.5
+        } else if (originalSizeMB > 10) {
+          compressionRatio = 0.6
+        } else {
+          compressionRatio = 0.7
+        }
+
+        const newWidth = Math.floor(img.width * compressionRatio)
+        const newHeight = Math.floor(img.height * compressionRatio)
+
+        canvas.width = newWidth
+        canvas.height = newHeight
+
+        // Draw compressed image
+        ctx.drawImage(img, 0, 0, newWidth, newHeight)
+
+        // Use JPEG with quality based on size
+        const quality = originalSizeMB > 15 ? 0.6 : 0.7
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality)
+
+        console.log(`Compressed from ${img.width}x${img.height} to ${newWidth}x${newHeight} (${(compressionRatio * 100).toFixed(0)}% scale, ${(quality * 100).toFixed(0)}% quality)`)
+        resolve(compressedDataUrl)
+      }
+      img.src = dataUrl
+    })
+  }
+
 
 
   private async tryAlternativeClipboard(dataUrl: string) {
@@ -468,8 +767,11 @@ class FullPageScreenshot {
       throw new Error("Could not get canvas context")
     }
 
-    // Load and draw each screenshot
-    for (const screenshot of this.screenshots) {
+    // Load and draw each screenshot at correct positions
+    console.log(`Combining ${this.screenshots.length} screenshots into ${pageWidth}x${pageHeight} canvas`)
+
+    for (let i = 0; i < this.screenshots.length; i++) {
+      const screenshot = this.screenshots[i]
       const img = new Image()
       await new Promise((resolve, reject) => {
         img.onload = resolve
@@ -477,10 +779,17 @@ class FullPageScreenshot {
         img.src = screenshot.dataUrl
       })
 
+      // Calculate the correct position in the combined image
+      // For vertical stacking: each screenshot goes at y = i * viewportHeight
+      const canvasX = 0  // Always start at left edge
+      const canvasY = i * viewportHeight  // Stack vertically
+
+      console.log(`Drawing screenshot ${i + 1} at canvas position (${canvasX}, ${canvasY})`)
+
       ctx.drawImage(
         img,
-        screenshot.scrollPosition.x,
-        screenshot.scrollPosition.y,
+        canvasX,
+        canvasY,
         viewportWidth,
         viewportHeight
       )
@@ -489,11 +798,18 @@ class FullPageScreenshot {
     // Convert canvas to data URL
     const finalDataUrl = canvas.toDataURL("image/png")
 
-    // For full page screenshots, download the image instead of clipboard (more reliable for large images)
+    // Debug: Log canvas and final image info
+    console.log(`Final canvas dimensions: ${canvas.width}x${canvas.height}`)
+    console.log(`Final dataUrl length: ${finalDataUrl.length} characters`)
+    console.log(`Final dataUrl starts with: ${finalDataUrl.substring(0, 50)}...`)
+
+    // Debug: Temporarily show the combined image to verify it's correct
+    this.showDebugImage(finalDataUrl, canvas.width, canvas.height)
+
+    // For full page screenshots, show interactive clipboard option
     if (copyToClipboard) {
-      console.log("Downloading full page screenshot...")
-      this.downloadImage(finalDataUrl, `full-page-screenshot-${Date.now()}.png`)
-      this.showNotification("Full page screenshot downloaded!", "success")
+      console.log("Showing interactive clipboard option for full page screenshot...")
+      this.showInteractiveClipboardOption(finalDataUrl)
     }
 
     return finalDataUrl
