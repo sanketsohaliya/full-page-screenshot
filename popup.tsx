@@ -43,41 +43,11 @@ function IndexPopup() {
     }
   }
 
-  const captureScreenshot = async (mode: "full" | "visible" = "full") => {
+  const captureAndCopyDirectly = async (mode: "visible" | "full" = "visible") => {
     if (isCapturing) return
 
     setIsCapturing(true)
     setStatus(mode === "full" ? "Capturing full page..." : "Capturing visible area...")
-
-    try {
-      // Send message to background script to start capture
-      const action = mode === "full" ? "capture-full-page" : "capture-visible-area"
-
-      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action })
-        setStatus("Screenshot capture initiated! Check the page for progress.")
-
-        // Close popup after a short delay
-        setTimeout(() => {
-          window.close()
-        }, 1500)
-      } else {
-        setStatus("Error: Chrome extension API not available")
-      }
-
-    } catch (error) {
-      console.error("Error:", error)
-      setStatus("Error: " + error.message)
-    } finally {
-      setIsCapturing(false)
-    }
-  }
-
-  const captureAndCopyDirectly = async () => {
-    if (isCapturing) return
-
-    setIsCapturing(true)
-    setStatus("Capturing screenshot...")
 
     try {
       // Get the active tab
@@ -88,8 +58,27 @@ function IndexPopup() {
         return
       }
 
-      // Capture the visible area directly
-      const dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' })
+      let dataUrl: string
+
+      if (mode === "visible") {
+        // Capture the visible area directly
+        dataUrl = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' })
+      } else {
+        // For full page, we'll use the background script but handle clipboard in popup
+        setStatus("Initiating full page capture...")
+
+        // Send message to background script for full page capture
+        const response = await chrome.runtime.sendMessage({
+          action: "capture-full-page-for-popup",
+          tabId: activeTab.id
+        })
+
+        if (!response?.success || !response?.dataUrl) {
+          throw new Error(response?.error || "Full page capture failed")
+        }
+
+        dataUrl = response.dataUrl
+      }
 
       setStatus("Copying to clipboard...")
 
@@ -110,7 +99,7 @@ function IndexPopup() {
 
     } catch (error) {
       console.error("Direct capture error:", error)
-      setStatus("❌ Direct capture failed: " + error.message)
+      setStatus("❌ Capture failed: " + error.message)
     } finally {
       setIsCapturing(false)
     }
@@ -128,7 +117,7 @@ function IndexPopup() {
       </h2>
 
       <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: "#666" }}>
-        Capture a full page screenshot and copy it to your clipboard.
+        Capture screenshots with reliable clipboard copying. Choose visible area for quick capture or full page for complete screenshots.
       </p>
 
       <div style={{ marginBottom: "16px" }}>
@@ -140,55 +129,39 @@ function IndexPopup() {
       </div>
 
       <button
-        onClick={() => captureScreenshot("full")}
+        onClick={() => captureAndCopyDirectly("visible")}
         disabled={isCapturing}
         style={{
           width: "100%",
-          padding: "12px",
-          backgroundColor: isCapturing ? "#ccc" : "#4CAF50",
-          color: "white",
-          border: "none",
-          borderRadius: "4px",
-          fontSize: "16px",
-          cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "8px"
-        }}>
-        {isCapturing ? "Capturing..." : "Capture Full Page"}
-      </button>
-
-      <button
-        onClick={() => captureScreenshot("visible")}
-        disabled={isCapturing}
-        style={{
-          width: "100%",
-          padding: "10px",
+          padding: "14px",
           backgroundColor: isCapturing ? "#ccc" : "#2196F3",
           color: "white",
           border: "none",
-          borderRadius: "4px",
-          fontSize: "14px",
+          borderRadius: "6px",
+          fontSize: "16px",
           cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "8px"
+          marginBottom: "10px",
+          fontWeight: "bold"
         }}>
-        {isCapturing ? "Capturing..." : "Quick Capture (Visible Area)"}
+        {isCapturing ? "Capturing..." : "📸 Capture Visible Area"}
       </button>
 
       <button
-        onClick={captureAndCopyDirectly}
+        onClick={() => captureAndCopyDirectly("full")}
         disabled={isCapturing}
         style={{
           width: "100%",
-          padding: "10px",
-          backgroundColor: isCapturing ? "#ccc" : "#9C27B0",
+          padding: "14px",
+          backgroundColor: isCapturing ? "#ccc" : "#4CAF50",
           color: "white",
           border: "none",
-          borderRadius: "4px",
-          fontSize: "14px",
+          borderRadius: "6px",
+          fontSize: "16px",
           cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "8px",
+          marginBottom: "16px",
           fontWeight: "bold"
         }}>
-        {isCapturing ? "Capturing..." : "🎯 Direct Capture & Copy"}
+        {isCapturing ? "Capturing..." : "📄 Capture Full Page"}
       </button>
 
       <button
@@ -203,7 +176,8 @@ function IndexPopup() {
           borderRadius: "4px",
           fontSize: "12px",
           cursor: "pointer",
-          marginBottom: "12px"
+          marginBottom: "12px",
+          opacity: 0.8
         }}>
         Test Clipboard Access
       </button>

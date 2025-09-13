@@ -21,10 +21,10 @@ class FullPageScreenshot {
   private useSimpleMode = false // Fallback to single screenshot if rate limited
   public lastCapturedDataUrl: string | null = null
 
-  async captureVisibleArea() {
+  async captureVisibleArea(): Promise<string | null> {
     if (this.isCapturing) {
       console.log("Screenshot capture already in progress")
-      return
+      return null
     }
 
     this.isCapturing = true
@@ -40,20 +40,24 @@ class FullPageScreenshot {
       if (this.screenshots.length > 0) {
         const screenshot = this.screenshots[0]
         await this.copyToClipboard(screenshot.dataUrl)
+        return screenshot.dataUrl
       }
 
     } catch (error) {
       console.error("Error during visible area capture:", error)
       this.showNotification("Error capturing screenshot: " + error.message, "error")
+      return null
     } finally {
       this.isCapturing = false
     }
+
+    return null
   }
 
-  async captureFullPage() {
+  async captureFullPage(copyToClipboard: boolean = true): Promise<string | null> {
     if (this.isCapturing) {
       console.log("Screenshot capture already in progress")
-      return
+      return null
     }
 
     this.isCapturing = true
@@ -101,8 +105,8 @@ class FullPageScreenshot {
         this.showNotification(`Large page detected. Switching to visible area capture to avoid rate limits.`, "error")
         await this.sleep(1000)
         // Fall back to visible area capture
-        await this.captureVisibleArea()
-        return
+        const visibleDataUrl = await this.captureVisibleArea()
+        return visibleDataUrl
       }
 
       // Capture screenshots by scrolling with rate limiting
@@ -130,8 +134,9 @@ class FullPageScreenshot {
       // Restore original scroll position
       window.scrollTo(this.originalScrollPosition.x, this.originalScrollPosition.y)
 
-      // Combine screenshots and copy to clipboard
-      await this.combineAndCopyScreenshots(pageWidth, pageHeight, viewportWidth, viewportHeight)
+      // Combine screenshots and optionally copy to clipboard
+      const dataUrl = await this.combineAndCopyScreenshots(pageWidth, pageHeight, viewportWidth, viewportHeight, copyToClipboard)
+      return dataUrl
 
     } catch (error) {
       console.error("Error during full page capture:", error)
@@ -147,13 +152,15 @@ class FullPageScreenshot {
           this.screenshots = []
           await this.sleep(2000) // Wait for rate limit to reset
           await this.captureVisibleArea()
-          return
+          return null
         } catch (fallbackError) {
           console.error("Fallback capture also failed:", fallbackError)
           this.showNotification("Error capturing screenshot: " + fallbackError.message, "error")
+          return null
         }
       } else {
         this.showNotification("Error capturing screenshot: " + error.message, "error")
+        return null
       }
     } finally {
       this.isCapturing = false
@@ -355,7 +362,7 @@ class FullPageScreenshot {
     this.showNotification("Right-click the image and select 'Copy Image' to copy to clipboard", "error")
   }
 
-  private async combineAndCopyScreenshots(pageWidth: number, pageHeight: number, viewportWidth: number, viewportHeight: number) {
+  private async combineAndCopyScreenshots(pageWidth: number, pageHeight: number, viewportWidth: number, viewportHeight: number, copyToClipboard: boolean = true): Promise<string> {
     // Create canvas to combine screenshots
     const canvas = document.createElement("canvas")
     canvas.width = pageWidth
@@ -384,11 +391,15 @@ class FullPageScreenshot {
       )
     }
 
-    // Convert canvas to data URL and send to background script for clipboard
+    // Convert canvas to data URL
     const finalDataUrl = canvas.toDataURL("image/png")
 
-    // Copy directly to clipboard
-    await this.copyToClipboard(finalDataUrl)
+    // Optionally copy to clipboard
+    if (copyToClipboard) {
+      await this.copyToClipboard(finalDataUrl)
+    }
+
+    return finalDataUrl
   }
 
   private async waitForScroll(targetX: number, targetY: number): Promise<void> {
@@ -455,6 +466,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === "clipboard-error") {
     console.log("Clipboard copy failed:", message.error)
     screenshotHandler.showNotification("Please click the extension icon and use 'Quick Capture' button for clipboard access", "error")
+  } else if (message.action === "capture-full-page-return-data") {
+    console.log("Content script received full page capture request for popup")
+
+    // Capture full page and return data directly (no clipboard copy)
+    screenshotHandler.captureFullPage(false).then(dataUrl => {
+      if (dataUrl) {
+        sendResponse({ success: true, dataUrl: dataUrl })
+      } else {
+        sendResponse({ success: false, error: "Full page capture failed" })
+      }
+    }).catch(error => {
+      console.error("Full page capture for popup failed:", error)
+      sendResponse({ success: false, error: error.message })
+    })
+
+    return true // Keep message channel open for async response
   }
 })
 
