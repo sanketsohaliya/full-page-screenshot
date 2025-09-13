@@ -3,6 +3,10 @@ import { useState, useEffect } from "react"
 function IndexPopup() {
   const [isCapturing, setIsCapturing] = useState(false)
   const [status, setStatus] = useState("")
+  const [mode, setMode] = useState<"visible" | "full" | "region" | null>(null)
+  // Force dark minimal mode
+  const dark = true
+  const compact = false
 
   // Listen for messages from content script
   useEffect(() => {
@@ -29,45 +33,6 @@ function IndexPopup() {
     }
   }, [])
 
-  const testClipboard = async () => {
-    try {
-      setStatus("Testing clipboard...")
-
-      // Create simple test image
-      const canvas = document.createElement('canvas')
-      canvas.width = 100
-      canvas.height = 100
-      const ctx = canvas.getContext('2d')
-
-      if (!ctx) {
-        throw new Error("Could not get canvas context")
-      }
-
-      ctx.fillStyle = '#4CAF50'
-      ctx.fillRect(0, 0, 100, 100)
-      ctx.fillStyle = 'white'
-      ctx.font = '16px Arial'
-      ctx.fillText('TEST', 30, 55)
-
-      const dataUrl = canvas.toDataURL('image/png')
-
-      // Convert to blob
-      const response = await fetch(dataUrl)
-      const blob = await response.blob()
-
-      // Copy to clipboard
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob })
-      ])
-
-      setStatus("✅ Clipboard test successful! Try pasting (Ctrl+V)")
-
-    } catch (error) {
-      console.error("Clipboard test error:", error)
-      setStatus("❌ Clipboard test failed: " + error.message)
-    }
-  }
-
   const captureAndCopyDirectly = async (mode: "visible" | "full" | "region" = "visible") => {
     if (isCapturing) return
 
@@ -79,6 +44,7 @@ function IndexPopup() {
           ? "Select an area on the page..."
           : "Capturing visible area..."
     )
+    setMode(mode)
 
     try {
       // Get the active tab
@@ -164,116 +130,101 @@ function IndexPopup() {
     }
   }
 
+  const rootStyle: React.CSSProperties = {
+    '--bg': '#111416',
+    '--border': '#1e2429',
+    '--border-soft': '#232a30',
+    '--text': '#e7eaec',
+    '--text-dim': '#7f8a93',
+    '--focus': '#2563eb',
+    background: '#111416',
+    color: '#e7eaec',
+    padding: 14,
+    minWidth: 280,
+    fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+  } as React.CSSProperties
+
+  // Removed toggle button styles (no toggles now)
+
   return (
-    <div
-      style={{
-        padding: 20,
-        minWidth: 300,
-        fontFamily: "Arial, sans-serif"
-      }}>
-      <h2 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#333" }}>
-        Full Page Screenshot
-      </h2>
-
-      <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: "#666" }}>
-        <strong>📸 Visible Area:</strong> Instant capture & clipboard copy<br/>
-        <strong>📄 Full Page:</strong> Complete page capture (refresh page if error occurs)
-      </p>
-
-      <div style={{ marginBottom: "16px" }}>
-        <strong>Keyboard Shortcut:</strong>
-        <br />
-        <code style={{ background: "#f5f5f5", padding: "2px 6px", borderRadius: "3px" }}>
-          Ctrl+Shift+S (Cmd+Shift+S on Mac)
-        </code>
+    <div style={rootStyle}>
+      <style>{`html,body{margin:0;padding:0;background:#111416 !important;} body{min-width:0;} ::selection{background:#2563eb33;} `}</style>
+      <style>{`
+        button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+        .grid { display:grid; gap:8px; }
+        .status-line { font-size:11px; min-height:18px; margin-top:8px; letter-spacing:.2px; }
+        .action-btn:hover:not([disabled]) { background:#1b2329; }
+        .action-btn:active:not([disabled]) { background:#202a31; }
+      `}</style>
+      <div style={{fontSize:13, fontWeight:600, marginBottom:8, letterSpacing:.4}}>Screenshot</div>
+      <div className="grid" aria-label="Capture actions">
+        <ActionButton
+          label="Capture Visible Area"
+          icon="📸"
+          color="neutral"
+          loading={isCapturing && mode==='visible'}
+          disabled={isCapturing}
+          onClick={() => captureAndCopyDirectly('visible')}
+          compact={compact}
+        />
+        <ActionButton
+          label="Capture Full Page"
+          icon="📄"
+          color="neutral"
+          loading={isCapturing && mode==='full'}
+          disabled={isCapturing}
+          onClick={() => captureAndCopyDirectly('full')}
+          compact={compact}
+        />
+        <ActionButton
+          label="Capture Region"
+          icon="✂️"
+          color="neutral"
+          loading={isCapturing && mode==='region'}
+          disabled={isCapturing}
+          onClick={() => captureAndCopyDirectly('region')}
+          compact={compact}
+        />
       </div>
 
-      <button
-        onClick={() => captureAndCopyDirectly("visible")}
-        disabled={isCapturing}
-        style={{
-          width: "100%",
-          padding: "14px",
-          backgroundColor: isCapturing ? "#ccc" : "#2196F3",
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          fontSize: "16px",
-          cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "10px",
-          fontWeight: "bold"
-        }}>
-        {isCapturing ? "Capturing..." : "📸 Capture Visible Area"}
-      </button>
-
-      <button
-        onClick={() => captureAndCopyDirectly("full")}
-        disabled={isCapturing}
-        style={{
-          width: "100%",
-          padding: "14px",
-          backgroundColor: isCapturing ? "#ccc" : "#4CAF50",
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          fontSize: "16px",
-          cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "16px",
-          fontWeight: "bold"
-        }}>
-        {isCapturing ? "Capturing..." : "📄 Capture Full Page"}
-      </button>
-
-      <button
-        onClick={() => captureAndCopyDirectly("region")}
-        disabled={isCapturing}
-        style={{
-          width: "100%",
-          padding: "14px",
-          backgroundColor: isCapturing ? "#ccc" : "#9C27B0",
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          fontSize: "16px",
-          cursor: isCapturing ? "not-allowed" : "pointer",
-          marginBottom: "16px",
-          fontWeight: "bold"
-        }}>
-        {isCapturing ? "Activating..." : "✂️ Capture Region"}
-      </button>
-
-      <button
-        onClick={testClipboard}
-        disabled={isCapturing}
-        style={{
-          width: "100%",
-          padding: "8px",
-          backgroundColor: "#FF9800",
-          color: "white",
-          border: "none",
-          borderRadius: "4px",
-          fontSize: "12px",
-          cursor: "pointer",
-          marginBottom: "12px",
-          opacity: 0.8
-        }}>
-        Test Clipboard Access
-      </button>
-
-      {status && (
-        <div style={{
-          fontSize: "12px",
-          color: status.includes("Error") ? "#f44336" : "#4CAF50",
-          textAlign: "center"
-        }}>
-          {status}
-        </div>
-      )}
-
-      <footer style={{ fontSize: "12px", color: "#999", textAlign: "center", marginTop: "16px" }}>
-        Full Page Screenshot Extension
-      </footer>
+      <div className="status-line" role="status" aria-live="polite" style={{color: status.startsWith('❌')? '#d32f2f': status.startsWith('✅')? '#2e7d32':'var(--text-dim)'}}>
+        {status || 'Ready'}
+      </div>
     </div>
+  )
+}
+
+interface ActionButtonProps { label: string; icon: string | null; color: 'neutral'; onClick: () => void; disabled?: boolean; loading?: boolean; compact?: boolean }
+const ActionButton = ({ label, icon, color, onClick, disabled, loading, compact }: ActionButtonProps) => {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-busy={loading}
+      style={{
+        width:'100%',
+        padding:'9px 10px',
+        background: disabled? '#1a2126': '#151b20',
+        color:'var(--text)',
+        border:'none',
+        borderRadius:10,
+        fontSize:12.5,
+        fontWeight:500,
+        letterSpacing:'.2px',
+        display:'flex',
+        alignItems:'center',
+        gap:10,
+        justifyContent:'flex-start',
+        cursor: disabled? 'not-allowed':'pointer',
+        position:'relative',
+        overflow:'hidden',
+        transition:'background .15s, filter .15s'
+      }}
+      className="action-btn"
+    >
+  {icon && <span style={{opacity: loading? .55:1, fontSize:14, width:18, textAlign:'center'}}>{icon}</span>}
+  <span style={{flex:1, textAlign:'left', whiteSpace:'nowrap'}}>{loading? 'Working...' : label}</span>
+    </button>
   )
 }
 

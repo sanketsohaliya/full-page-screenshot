@@ -1,33 +1,7 @@
 // Background script for screenshot extension
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-// Listen for keyboard shortcut commands
-chrome.commands.onCommand.addListener(async (command) => {
-  console.log("Command received:", command)
-
-  if (command === "capture-screenshot") {
-    try {
-      // Get the active tab
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true })
-
-      if (!activeTab?.id) {
-        console.error("No active tab found")
-        return
-      }
-
-      console.log("Sending capture message to tab:", activeTab.id)
-
-      // The content script is already registered in manifest, so we don't need to inject it
-      // Just send the message directly
-
-      // Send message to content script to start screenshot process
-      chrome.tabs.sendMessage(activeTab.id, { action: "capture-full-page" })
-
-    } catch (error) {
-      console.error("Error capturing screenshot:", error)
-    }
-  }
-})
+// Keyboard shortcut support removed by request; all capture flows initiated via popup UI.
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {

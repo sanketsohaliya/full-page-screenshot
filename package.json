@@ -2,7 +2,7 @@
   "name": "screenshot-extension",
   "displayName": "Full Page Screenshot",
   "version": "0.0.1",
-  "description": "Capture full page screenshots with keyboard shortcuts and copy to clipboard",
+  "description": "Capture visible, full page, or region screenshots and copy to clipboard",
   "author": "Plasmo Corp. <foss@plasmo.com>",
   "scripts": {
     "dev": "plasmo dev",
@@ -33,15 +33,6 @@
       "clipboardWrite",
       "scripting",
       "offscreen"
-    ],
-    "commands": {
-      "capture-screenshot": {
-        "suggested_key": {
-          "default": "Ctrl+Shift+S",
-          "mac": "Command+Shift+S"
-        },
-        "description": "Capture full page screenshot"
-      }
-    }
+    ]
   }
 }
