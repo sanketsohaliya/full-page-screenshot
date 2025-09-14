@@ -1,7 +1,7 @@
 {
   "name": "screenshot-extension",
   "displayName": "Full Page & Scrolling Screenshot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Full page & scrolling screenshots plus region/visible screen capture and quick copy or download.",
   "author": "Sanket Patel <sanketsohaliya@gmail.com>",
   "scripts": {
