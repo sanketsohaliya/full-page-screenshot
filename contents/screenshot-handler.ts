@@ -854,6 +854,11 @@ class FullPageScreenshot {
   private regionLabel: HTMLDivElement | null = null
   private regionActive = false
   private regionUsesPageCoords = true
+  // Four shaded layers to allow a "hole" effect with blur outside the selection
+  private regionShadeTop: HTMLDivElement | null = null
+  private regionShadeLeft: HTMLDivElement | null = null
+  private regionShadeRight: HTMLDivElement | null = null
+  private regionShadeBottom: HTMLDivElement | null = null
 
   public startRegionSelection() {
     if (this.regionActive) return
@@ -874,25 +879,30 @@ class FullPageScreenshot {
       document.documentElement.clientHeight
     )
 
+    // Root container to hold shaded segments & selection box
     this.regionOverlay = document.createElement('div')
-    this.regionOverlay.style.cssText = `
-      position: absolute;
-      top:0; left:0;
-      width:${pageWidth}px; height:${pageHeight}px;
-      background: rgba(0,0,0,0.08);
-      cursor: crosshair;
-      z-index: 2147483646;
-      pointer-events:none;
-    `
+    this.regionOverlay.style.cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;z-index:2147483646;pointer-events:none;`;
+
+    const makeShade = () => {
+      const d = document.createElement('div')
+      // Subtle dim (no blur) similar to Windows Snipping Tool overlay
+      d.style.cssText = 'position:absolute;background:rgba(0,0,0,0.32);pointer-events:none;'
+      return d
+    }
+    this.regionShadeTop = makeShade()
+    this.regionShadeLeft = makeShade()
+    this.regionShadeRight = makeShade()
+    this.regionShadeBottom = makeShade()
 
     this.regionSelectionBox = document.createElement('div')
     this.regionSelectionBox.style.cssText = `
       position: absolute;
-      border: 2px solid #9C27B0;
-      background: rgba(156,39,176,0.18);
-      box-shadow: 0 0 0 1px rgba(255,255,255,0.35);
+      border: 1.5px dashed rgba(255,255,255,0.95);
+      background: rgba(255,255,255,0.06);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
       pointer-events: none;
-      z-index: 2147483647;
+      z-index: 2147483648;
+      border-radius:3px;
     `
 
     this.regionLabel = document.createElement('div')
@@ -909,9 +919,30 @@ class FullPageScreenshot {
       white-space: nowrap;
     `
 
-    document.body.appendChild(this.regionOverlay)
-    document.body.appendChild(this.regionSelectionBox)
-    document.body.appendChild(this.regionLabel)
+  this.regionOverlay.appendChild(this.regionShadeTop)
+  this.regionOverlay.appendChild(this.regionShadeLeft)
+  this.regionOverlay.appendChild(this.regionShadeRight)
+  this.regionOverlay.appendChild(this.regionShadeBottom)
+  this.regionOverlay.appendChild(this.regionSelectionBox)
+  this.regionOverlay.appendChild(this.regionLabel)
+  document.body.appendChild(this.regionOverlay)
+
+    // Initially dim entire page until user begins dragging
+    if (this.regionShadeTop && this.regionShadeBottom && this.regionShadeLeft && this.regionShadeRight) {
+      const pw = pageWidth
+      const ph = pageHeight
+      this.regionShadeTop.style.left = '0px'
+      this.regionShadeTop.style.top = '0px'
+      this.regionShadeTop.style.width = pw + 'px'
+      this.regionShadeTop.style.height = ph + 'px'
+      // Other shades collapsed
+      this.regionShadeBottom.style.width = '0px'
+      this.regionShadeBottom.style.height = '0px'
+      this.regionShadeLeft.style.width = '0px'
+      this.regionShadeLeft.style.height = '0px'
+      this.regionShadeRight.style.width = '0px'
+      this.regionShadeRight.style.height = '0px'
+    }
 
     // Prevent page text selection / cursor artifacts while dragging
     const selectionBlockStyleId = '__fps_region_selection_block__'
@@ -950,7 +981,8 @@ class FullPageScreenshot {
       this.regionActive = false
 
       // Important: wait a frame so Chrome repaints without overlay/border before capture
-      await this.sleep(80)
+  // Slightly longer delay to ensure overlay & dim layers removed before capture
+  await this.sleep(140)
 
   // Restore selection ability
   const styleNode = document.getElementById(selectionBlockStyleId)
@@ -1029,6 +1061,32 @@ class FullPageScreenshot {
     this.regionLabel.style.left = (rect.x + rect.width / 2) + 'px'
     this.regionLabel.style.top = rect.y + 'px'
     this.regionLabel.textContent = `${rect.width} x ${rect.height}`
+
+    // Update shaded segments to frame selection hole
+    if (this.regionShadeTop && this.regionShadeLeft && this.regionShadeRight && this.regionShadeBottom) {
+      const pageW = this.regionOverlay ? this.regionOverlay.offsetWidth : document.documentElement.scrollWidth
+      const pageH = this.regionOverlay ? this.regionOverlay.offsetHeight : document.documentElement.scrollHeight
+      // Top
+      this.regionShadeTop.style.left = '0px'
+      this.regionShadeTop.style.top = '0px'
+      this.regionShadeTop.style.width = pageW + 'px'
+      this.regionShadeTop.style.height = rect.y + 'px'
+      // Bottom
+      this.regionShadeBottom.style.left = '0px'
+      this.regionShadeBottom.style.top = (rect.y + rect.height) + 'px'
+      this.regionShadeBottom.style.width = pageW + 'px'
+      this.regionShadeBottom.style.height = Math.max(0, pageH - (rect.y + rect.height)) + 'px'
+      // Left
+      this.regionShadeLeft.style.left = '0px'
+      this.regionShadeLeft.style.top = rect.y + 'px'
+      this.regionShadeLeft.style.width = rect.x + 'px'
+      this.regionShadeLeft.style.height = rect.height + 'px'
+      // Right
+      this.regionShadeRight.style.left = (rect.x + rect.width) + 'px'
+      this.regionShadeRight.style.top = rect.y + 'px'
+      this.regionShadeRight.style.width = Math.max(0, pageW - (rect.x + rect.width)) + 'px'
+      this.regionShadeRight.style.height = rect.height + 'px'
+    }
   }
 
   private getNormalizedRegion() {
@@ -1047,6 +1105,10 @@ class FullPageScreenshot {
     this.regionSelectionBox?.remove()
     this.regionOverlay?.remove()
     this.regionLabel?.remove()
+    this.regionShadeTop = null
+    this.regionShadeLeft = null
+    this.regionShadeRight = null
+    this.regionShadeBottom = null
     this.regionSelectionBox = null
     this.regionOverlay = null
     this.regionLabel = null
