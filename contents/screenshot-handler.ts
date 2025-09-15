@@ -129,25 +129,9 @@ class FullPageScreenshot {
         // Popup might be closed, that's ok
       }
 
-      // Set up a global message handler for this capture session
+      // Sequential capture state
       const expectedScreenshots = totalScreenshots
       let capturedCount = 0
-
-      const globalHandler = (message: any) => {
-        if (message.action === "screenshot-captured" && this.isCapturing) {
-          console.log(`Global handler: Screenshot ${capturedCount + 1}/${expectedScreenshots} captured`)
-          this.screenshots.push({
-            dataUrl: message.dataUrl,
-            scrollPosition: message.scrollPosition,
-            viewportHeight: window.innerHeight,
-            viewportWidth: window.innerWidth
-          })
-          capturedCount++
-          try { this.progressOverlay?.update(capturedCount, expectedScreenshots) } catch(_) {}
-        }
-      }
-
-      chrome.runtime.onMessage.addListener(globalHandler)
 
       try {
         // Capture screenshots by scrolling with rate limiting
@@ -167,16 +151,12 @@ class FullPageScreenshot {
               await this.waitForScroll(scrollX, scrollY)
               await this.sleep(300) // Wait for rendering
 
-              // Request screenshot from background script
-              console.log(`Requesting screenshot ${row * horizontalScreenshots + col + 1}/${expectedScreenshots} at ${scrollX},${scrollY}`)
-              chrome.runtime.sendMessage({
-                action: "capture-visible-area",
-                scrollPosition: { x: scrollX, y: scrollY }
-              })
-
-              // Add delay between captures to respect Chrome's rate limit
-              // Chrome allows max 2 captures per second, so wait at least 600ms
-              await this.sleep(700)
+              // Capture this frame (overlay hidden during actual bitmap capture)
+              const shot = await this.captureFrame(scrollX, scrollY)
+              this.screenshots.push(shot)
+              capturedCount++
+              try { this.progressOverlay?.update(capturedCount, expectedScreenshots) } catch(_) {}
+              await this.sleep(650) // rate-limit buffer
             } catch (error) {
               console.error(`Error in screenshot loop at row ${row}, col ${col}:`, error)
               // Continue with next screenshot
@@ -186,25 +166,12 @@ class FullPageScreenshot {
         }
         console.log(`All ${verticalScreenshots} rows completed`)
 
-        // Wait for all screenshots to be captured
-        console.log("Waiting for all screenshots to be captured...")
-        let waitTime = 0
-        while (capturedCount < expectedScreenshots && waitTime < 30000) {
-          await this.sleep(500)
-          waitTime += 500
-          console.log(`Waiting... ${capturedCount}/${expectedScreenshots} captured`)
-        }
-
-        if (capturedCount < expectedScreenshots) {
-          throw new Error(`Timeout: Only captured ${capturedCount}/${expectedScreenshots} screenshots`)
-        }
+        // All frames captured sequentially
 
       } catch (outerError) {
         console.error("Error in screenshot capture process:", outerError)
         throw outerError
-      } finally {
-        chrome.runtime.onMessage.removeListener(globalHandler)
-      }
+      } 
 
   console.log(`All screenshots captured! Total: ${this.screenshots.length}`)
   // Force final 100% progress update before combining
@@ -379,6 +346,41 @@ class FullPageScreenshot {
         chrome.runtime.onMessage.removeListener(messageHandler)
         reject(new Error("Extension context invalidated"))
       }
+    })
+  }
+
+  private async captureFrame(scrollX: number, scrollY: number): Promise<ScreenshotData> {
+    return withProgressHidden(async () => {
+      return new Promise<ScreenshotData>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          chrome.runtime.onMessage.removeListener(handler)
+          reject(new Error('Frame capture timeout'))
+        }, 15000)
+        const handler = (message: any) => {
+          if (message.action === 'screenshot-captured' && Math.abs(message.scrollPosition.x - scrollX) <= 5 && Math.abs(message.scrollPosition.y - scrollY) <= 5) {
+            clearTimeout(timeout)
+            chrome.runtime.onMessage.removeListener(handler)
+            resolve({
+              dataUrl: message.dataUrl,
+              scrollPosition: { x: scrollX, y: scrollY },
+              viewportHeight: window.innerHeight,
+              viewportWidth: window.innerWidth
+            })
+          } else if (message.action === 'screenshot-error') {
+            clearTimeout(timeout)
+            chrome.runtime.onMessage.removeListener(handler)
+            reject(new Error(message.error))
+          }
+        }
+        chrome.runtime.onMessage.addListener(handler)
+        try {
+          chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: scrollX, y: scrollY } })
+        } catch (e) {
+          clearTimeout(timeout)
+          chrome.runtime.onMessage.removeListener(handler)
+          reject(new Error('Extension context invalidated'))
+        }
+      })
     })
   }
 
@@ -1138,7 +1140,7 @@ class FullPageScreenshot {
       let localOverlay: {update:(c:number,t:number)=>void;remove:()=>void}|undefined
       try { localOverlay = this.showProgressOverlay(1, 'Capturing region…') } catch(_) {}
       try {
-        const dataUrl: string = await new Promise((resolve, reject) => {
+        const dataUrl: string = await withProgressHidden(async () => new Promise((resolve, reject) => {
           const handler = (message: any) => {
             if (message.action === 'screenshot-captured') {
               chrome.runtime.onMessage.removeListener(handler)
@@ -1150,7 +1152,7 @@ class FullPageScreenshot {
           }
           chrome.runtime.onMessage.addListener(handler)
           chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: currentScrollX, y: currentScrollY } })
-        })
+        }))
         localOverlay?.update(1,1)
         const relativeViewportRect = { x: rect.x - currentScrollX, y: rect.y - currentScrollY, width: rect.width, height: rect.height }
         const cropped = await this.cropDataUrl(dataUrl, relativeViewportRect)
@@ -1182,7 +1184,7 @@ class FullPageScreenshot {
       window.scrollTo(scrollX, scrollY)
       await this.waitForScroll(scrollX, scrollY)
       await this.sleep(250)
-      const dataUrl: string = await new Promise((res, rej) => {
+      const dataUrl: string = await withProgressHidden(async () => new Promise((res, rej) => {
         const handler = (message: any) => {
           if (message.action === 'screenshot-captured' && Math.abs(message.scrollPosition.x - scrollX) < 5 && Math.abs(message.scrollPosition.y - scrollY) < 5) {
             chrome.runtime.onMessage.removeListener(handler)
@@ -1194,7 +1196,7 @@ class FullPageScreenshot {
         }
         chrome.runtime.onMessage.addListener(handler)
         chrome.runtime.sendMessage({ action: 'capture-visible-area', scrollPosition: { x: scrollX, y: scrollY } })
-      })
+      }))
       tiles.push({ dataUrl, x: scrollX, y: scrollY })
       await this.sleep(650) // rate-limit buffer
       resolve()
@@ -1355,3 +1357,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 console.log("Screenshot handler content script loaded")
 
 export {}
+
+// Utility to hide progress overlay elements during a capture so they are not included in bitmaps.
+function getProgressElements(): HTMLElement[] {
+  return Array.from(document.querySelectorAll('[data-screenshot-progress]')) as HTMLElement[]
+}
+
+async function withProgressHidden<T>(fn: () => Promise<T> | T): Promise<T> {
+  const els = getProgressElements()
+  if (!els.length) return fn()
+  const prev: { el: HTMLElement; visibility: string; aria: string | null }[] = els.map(el => ({
+    el,
+    visibility: el.style.visibility,
+    aria: el.getAttribute('aria-hidden')
+  }))
+  els.forEach(el => {
+    el.style.visibility = 'hidden'
+    el.setAttribute('aria-hidden', 'true')
+  })
+  // Wait two animation frames to ensure painting happens before capture
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+  try {
+    return await fn()
+  } finally {
+    prev.forEach(p => {
+      p.el.style.visibility = p.visibility
+      if (p.aria === null) p.el.removeAttribute('aria-hidden')
+      else p.el.setAttribute('aria-hidden', p.aria)
+    })
+  }
+}

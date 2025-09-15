@@ -215,3 +215,8 @@ This project uses Plasmo for Chrome extension development. Key files:
 - Adjust permissions in `package.json` manifest section
 
 For more information, visit the [Plasmo Documentation](https://docs.plasmo.com/)
+
+## Progress Overlay Exclusion
+The animated dot progress overlay (`data-screenshot-progress`) is now automatically hidden for the exact frame(s) when a bitmap capture is requested (full page, region, or visible area). This prevents the progress UI from appearing inside the stitched screenshot. The element is visually restored immediately after each capture so the user still sees live progress.
+
+If you customize the progress markup, keep the `data-screenshot-progress` attribute so the hider continues to work.
